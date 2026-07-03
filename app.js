@@ -957,7 +957,7 @@ function buildProjectionChart(rows, result, inp, mc) {
   charts.proj = new Chart(ctx, {
     type: 'line', data: { labels: yrs, datasets: ds },
     options: {
-      responsive: true, maintainAspectRatio: true,
+      responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         msLines: { lines: msLines },
@@ -994,7 +994,7 @@ function buildFinalChart(result) {
       ],
     },
     options: {
-      responsive: true, maintainAspectRatio: true,
+      responsive: true, maintainAspectRatio: false,
       plugins: {
         legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
         tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } },
@@ -1021,7 +1021,7 @@ function buildOwnCostChart(row) {
     type: 'doughnut',
     data: { labels: vals.map(x => x.l), datasets: [{ data: vals.map(x => x.v), backgroundColor: vals.map(x => x.c + 'CC'), borderColor: vals.map(x => x.c), borderWidth: 2, hoverOffset: 6 }] },
     options: {
-      responsive: true, maintainAspectRatio: true,
+      responsive: true, maintainAspectRatio: false,
       plugins: {
         legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
         tooltip: { callbacks: { label: c => ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / grossCost * 100).toFixed(0)}%)` } },
@@ -1049,7 +1049,7 @@ function buildGapChart(rows) {
       }],
     },
     options: {
-      responsive: true, maintainAspectRatio: true,
+      responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${fmt(c.parsed.y)}/yr ${c.parsed.y >= 0 ? 'invested' : 'drawn'}` } } },
       scales: {
         x: { title: { display: true, text: 'Year', font: { size: 11 } }, grid: { display: false } },
@@ -1075,7 +1075,7 @@ function buildEquityChart(rows) {
       ],
     },
     options: {
-      responsive: true, maintainAspectRatio: true,
+      responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
@@ -1124,6 +1124,9 @@ function renderHero(inp, result, mc) {
     : chip('Equity overtakes portfolio', 'never in horizon');
 
   const nominalWinner = result.delta >= 0 ? 'Rent' : 'Buy';
+
+  el.classList.remove('hero-rent-wins', 'hero-buy-wins');
+  el.classList.add(npvDelta >= 0 ? 'hero-rent-wins' : 'hero-buy-wins');
 
   el.innerHTML = `
     <div class="hero-kicker">${kicker}</div>
