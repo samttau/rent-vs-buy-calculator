@@ -152,7 +152,7 @@ volatility rather than just the single point-estimate case.
 
 ## Features
 
-- 🌏 Per-state stamp duty auto-estimation (NSW, VIC, QLD, WA, SA, TAS, ACT, NT)
+- 🌏 Per-state stamp duty auto-estimation (NSW, VIC, QLD, WA, SA, TAS, ACT, NT), plus a Lenders Mortgage Insurance auto-estimator based on LVR band
 - 🏦 Mortgage offset vs surplus-ETF investing, with automatic overflow between the two
 - 📊 5 charts: wealth paths, final position (nominal vs NPV), year-1 cost breakdown, annual cash-flow gap, and property value vs mortgage balance
 - ⚖️ Automated break-even sensitivity report (bisection solver)
@@ -160,8 +160,15 @@ volatility rather than just the single point-estimate case.
 - 🎛️ Interactive "what-if" slider for the analysis horizon
 - 📋 Alternate scenario cards (higher rates, faster rent growth, longer horizon, etc.)
 - 📄 One-click full CSV export — inputs, summary, scenarios, break-even report, and the full year-by-year table, all in one file
-- 🌙 Dark mode, shareable links (all inputs encoded in the URL), local persistence
+- 🌙 Dark mode, shareable links (all inputs encoded in the URL), local persistence (localStorage + a 1-year cookie fallback)
 - 🔍 Diagnostic audit log (copy full input/output JSON to clipboard for debugging)
+
+## Privacy
+
+Everything runs entirely in your browser. There's no backend and no
+analytics — your inputs are never sent anywhere except to your own
+browser's local storage (to remember your last session) or, if you use the
+"share link" button, into the URL you explicitly choose to share.
 
 ## Project structure
 
