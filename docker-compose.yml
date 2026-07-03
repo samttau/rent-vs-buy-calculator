@@ -1,0 +1,8 @@
+services:
+  rent-vs-buy-calculator:
+    build: .
+    ports:
+      - "8182:80"
+    restart: unless-stopped
+    volumes:
+      - .:/usr/share/nginx/html:ro
