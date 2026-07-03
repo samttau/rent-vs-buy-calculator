@@ -1,228 +1,145 @@
-# 🏡 Australian Rent vs Buy Calculator
+# Australian Rent vs Buy Calculator
 
-A single-page, no-build-step financial calculator that models the real, after-tax
-cost of **buying a home** versus **renting and investing the difference** in
-Australia — with proper mortgage amortisation, stamp duty, CGT, franking
-credits, negative gearing, Monte Carlo simulation, NPV analysis, and an
-automatic break-even sensitivity report.
+A single page financial calculator for comparing buying a home against renting and investing the difference in Australia. It handles mortgage amortisation, stamp duty, CGT, franking credits, negative gearing, a Monte Carlo simulation, NPV, and a break-even sensitivity report.
 
-Everything runs client-side in vanilla JavaScript. There's no backend, no
-build tooling, and no external dependencies beyond [Chart.js](https://www.chartjs.org/)
-loaded from a CDN.
+It runs entirely client side in vanilla JavaScript. No backend, no build tooling, no dependencies apart from [Chart.js](https://www.chartjs.org/) pulled in from a CDN.
 
 ## Why this exists
 
-Most rent-vs-buy calculators either oversimplify (ignore tax, ignore
-opportunity cost of the deposit) or bury the real driver of the outcome
-(mortgage interest vs investment returns) under too many toggles. This tool
-tries to model **every dollar** — every dollar not spent on one path is
-either invested, sitting in a mortgage offset, or explicitly accounted for as
-a cost — so the comparison is a true apples-to-apples one, not a rough
-guess.
+Most rent vs buy calculators either skip the tax side of things or bury the actual driver of the outcome (mortgage interest vs investment returns) under a pile of toggles. This one tries to track every dollar properly. Anything not spent on one path ends up invested, sitting in a mortgage offset, or accounted for as a cost somewhere, so the comparison is genuinely apples to apples rather than a back of envelope guess.
 
-## Live demo
+## Running it
 
 ```bash
 docker compose up -d
 ```
 
-Then open **http://localhost:8182**.
+Then open http://localhost:8182.
 
-## Quick start (no Docker)
-
-This is a static site — any web server works:
+Without Docker, it's a static site, so any web server works:
 
 ```bash
 python3 -m http.server 8000
-# or just open index.html directly in a browser
 ```
+
+or just open index.html directly.
 
 ## How the model works
 
-### The core idea: differential cash flow
+### Differential cash flow
 
-Each year, the calculator computes:
+Each year the calculator works out:
 
 ```
 ownerCarry  = mortgage repayment + maintenance + rates/body corp + insurance
-              + land tax − rental income (if investment property) − negative
+              + land tax - rental income (if investment property) - negative
               gearing tax benefit
 renterCarry = rent + contents insurance
-gap         = ownerCarry − renterCarry
+gap         = ownerCarry - renterCarry
 ```
 
-If `gap > 0` (owning costs more that year), the **renter's portfolio grows**
-by that amount — the renter is saving exactly what the buyer is spending on
-top of an equivalent rent. If `gap < 0`, the renter draws down their
-portfolio to cover the shortfall (or, symmetrically, the buyer's own surplus
-pot grows).
+When owning costs more that year (gap > 0), the renter's portfolio grows by that amount, since the renter is saving whatever the buyer is spending on top of an equivalent rent. When gap < 0, the renter draws down their portfolio to cover the shortfall, and the buyer's surplus pot grows instead.
 
-This is a **differential model**: it never tracks total income or total
-household spending, only the *difference* between the two paths. Anything
-that costs exactly the same regardless of whether you rent or buy (e.g.
-groceries, HECS/HELP repayments) cancels out of the comparison and is
-deliberately left out.
+It's a differential model. It never tracks total income or total household spending, only the gap between the two paths. Anything that costs the same either way (groceries, HECS repayments) cancels out and is left out on purpose.
 
 ### Money is always sitting somewhere
 
-Every dollar in the model is at all times in exactly one of:
+At any point every dollar is in exactly one of these places:
 
-- **Renter's ETF portfolio** — grows from the day-1 "Total Savings" investment
-  plus/minus the annual cash-flow gap
-- **Buyer's mortgage offset account** — reduces the interest-bearing loan
-  balance dollar-for-dollar (tax-free, guaranteed return equal to the
-  mortgage rate)
-- **Buyer's own ETF surplus pot** — once the offset account fully covers the
-  outstanding loan, any further surplus automatically spills into ETFs
-  (taxed like the renter's portfolio)
-- **Property equity** (value minus mortgage balance)
+- the renter's ETF portfolio, which grows from the day one Total Savings investment plus or minus the annual cash flow gap
+- the buyer's mortgage offset account, reducing the interest bearing loan balance dollar for dollar (a tax free, guaranteed return equal to the mortgage rate)
+- the buyer's own ETF surplus pot, which absorbs anything left over once the offset fully covers the loan
+- property equity (value minus mortgage balance)
 
-Nothing is silently discarded or double-counted — surplus in one place never
-also reduces or drains another pot for the same dollar.
+Nothing gets silently dropped or double counted. Surplus sitting in one place never also drains another pot for the same dollar.
 
 ### Mortgage
 
-Standard principal & interest (or interest-only) amortisation, computed
-monthly and rolled up annually. A mortgage offset balance reduces the
-interest-bearing amount (`balance − offset`) each month, exactly like a real
-100% offset account.
+Standard principal and interest (or interest only) amortisation, done monthly and rolled up per year. An offset balance reduces the interest bearing amount (balance minus offset) each month, the way a real 100% offset account works.
 
 ### Tax
 
-- **Income tax**: either a flat user-set marginal rate, or derived each year
-  from the ATO FY 2025–26 resident tax brackets (+ 2% Medicare Levy) applied
-  to a gross salary that can optionally grow with inflation (bracket creep).
-- **Dividend/distribution tax**: annual ETF distributions are taxed at the
-  marginal rate, with a franking credit top-up/discount based on the
-  franking level you set (0% for international/unfranked funds, up to 100%
-  for a fully franked ASX fund).
-- **Capital gains tax** on the renter's (and buyer's surplus) portfolio, with
-  two selectable methods:
-  - **FY27 rules** (default) — models the *Treasury Laws Amendment (Tax
-    Reform No. 1) Bill 2026*: the 50% CGT discount is replaced by CPI
-    indexation of each contribution's cost base, so only the **real** gain
-    is taxed, at a 30% minimum rate (pensioners/income-support recipients
-    keep their ordinary marginal rate instead of the floor).
-  - **Legacy** — current law: a flat 50% discount on gains held over 12
-    months.
-  - The buyer's main residence (PPOR) is always assumed fully CGT-exempt on
-    sale, regardless of which method is chosen for the ETF side.
-- **Negative gearing** (only relevant if you flip the property to "treat as
-  investment property"): defaults to **abolished** for properties bought
-  after 12 May 2026, reflecting an assumed FY27 policy change — rental
-  losses can't offset your salary income. Toggle it on to compare against
-  the current/historical rules.
+- Income tax: either a flat marginal rate you set, or derived each year from the ATO FY 2025-26 brackets plus the 2% Medicare Levy, applied to a gross salary that can optionally grow with inflation so bracket creep is captured.
+- Dividend/distribution tax: annual ETF distributions are taxed at the marginal rate with a franking credit top up or discount based on the franking level you set (0% for unfranked/international funds, up to 100% for a fully franked ASX fund).
+- Capital gains tax on the renter's (and buyer's surplus) portfolio, with two methods to choose from:
+  - FY27 rules (the default), modelling the Treasury Laws Amendment (Tax Reform No. 1) Bill 2026. The 50% CGT discount is replaced by CPI indexation of each contribution's cost base, so only the real gain is taxed, at a 30% minimum rate. Pensioners and income support recipients keep their ordinary marginal rate instead of the floor.
+  - Legacy, meaning current law: a flat 50% discount on gains held over 12 months.
+  - The buyer's main residence is always assumed fully CGT exempt on sale regardless of which method applies to the ETF side.
+- Negative gearing (only relevant if you flip the property to "investment property" mode) defaults to abolished for properties bought after 12 May 2026, reflecting an assumed FY27 policy change where rental losses can't offset salary income. There's a toggle to compare against the current rules.
 
 ### Buying costs modelled
 
-Stamp duty (auto-estimated per state/territory, with rough first-home-buyer
-concessions), legal fees, Lenders Mortgage Insurance (auto-estimated by
-LVR band), the First Home Owner Grant, selling agent fees, council rates,
-body corporate/strata fees (with their own growth rate — $0 for a
-standalone house), building insurance, and ongoing maintenance as a % of
-property value.
+Stamp duty (auto estimated per state, with rough first home buyer concessions), legal fees, Lenders Mortgage Insurance (auto estimated by LVR band), the First Home Owner Grant, selling agent fees, council rates, body corporate/strata fees with their own growth rate (zero for a standalone house), building insurance, and ongoing maintenance as a percentage of property value.
 
 ### Investment property mode
 
-Optionally model the property as a rental (not lived in): rental income net
-of vacancy allowance and property management fees, land tax, and
-depreciation deductions (a non-cash deduction that reduces taxable loss
-without being a real cash cost).
+You can optionally model the property as a rental instead of somewhere you live: rental income net of a vacancy allowance and property management fees, land tax, and depreciation deductions (a non-cash deduction that reduces the taxable loss without being a real cash cost).
 
-### NPV & the break-even report
+### NPV and the break-even report
 
-Every result is shown two ways: **nominal** (actual dollars at the end of
-the horizon) and **NPV** (discounted back to today's dollars using the
-general inflation rate) — NPV is the real basis for "which is actually
-better," since a nominal dollar in year 30 is worth much less than one
-today.
+Results are shown two ways: nominal (actual dollars at the end of the horizon) and NPV (discounted back to today's dollars using the inflation rate). NPV is really the fairer basis for comparison, since a dollar in year 30 is worth a lot less than a dollar today.
 
-At the bottom of the results, a **break-even report** uses a bisection
-solver to answer questions like *"how much would rent need to rise to make
-buying and renting exactly equal?"* for each key lever — weekly rent, rent
-growth, mortgage rate, property growth, investment return, purchase price,
-council rates, and maintenance rate — holding everything else fixed.
+Below the main results, a break-even report uses a bisection solver to answer questions like how much rent would need to rise for buying and renting to end up exactly equal. It does this for each key lever: weekly rent, rent growth, mortgage rate, property growth, investment return, purchase price, council rates, and maintenance rate, holding everything else fixed.
 
 ### Monte Carlo simulation
 
-400 randomised market/property-growth histories (seeded, so results are
-stable across recalculations) report the share of simulations where buying
-comes out ahead, giving a sense of how sensitive the verdict is to
-volatility rather than just the single point-estimate case.
+400 randomised market and property growth histories, seeded so results stay stable between recalculations, report the share of simulations where buying comes out ahead. Gives a sense of how sensitive the verdict is to volatility rather than just relying on the single point estimate.
 
 ## Features
 
-- 🌏 Per-state stamp duty auto-estimation (NSW, VIC, QLD, WA, SA, TAS, ACT, NT), plus a Lenders Mortgage Insurance auto-estimator based on LVR band
-- 🏦 Mortgage offset vs surplus-ETF investing, with automatic overflow between the two
-- 📊 5 charts: wealth paths, final position (nominal vs NPV), year-1 cost breakdown, annual cash-flow gap, and property value vs mortgage balance
-- ⚖️ Automated break-even sensitivity report (bisection solver)
-- 🎲 Monte Carlo simulation (400 runs) with a Buy-success percentage
-- 🎛️ Interactive "what-if" slider for the analysis horizon
-- 📋 Alternate scenario cards (higher rates, faster rent growth, longer horizon, etc.)
-- 📄 One-click full CSV export — inputs, summary, scenarios, break-even report, and the full year-by-year table, all in one file
-- 🌙 Dark mode, shareable links (all inputs encoded in the URL), local persistence (localStorage + a 1-year cookie fallback)
-- 🔍 Diagnostic audit log (copy full input/output JSON to clipboard for debugging)
+- Per state stamp duty auto estimation (NSW, VIC, QLD, WA, SA, TAS, ACT, NT), plus an LMI auto estimator based on LVR band
+- Mortgage offset vs surplus ETF investing, with automatic overflow between the two
+- 5 charts covering wealth paths, final position (nominal vs NPV), year 1 cost breakdown, annual cash flow gap, and property value vs mortgage balance
+- Automated break-even sensitivity report using a bisection solver
+- Monte Carlo simulation (400 runs) with a buy-success percentage
+- Interactive what-if slider for the analysis horizon
+- Alternate scenario cards (higher rates, faster rent growth, longer horizon, etc.)
+- One click full CSV export covering inputs, summary, scenarios, break-even report, and the full year by year table in one file
+- Dark mode, shareable links (inputs encoded in the URL), local persistence via localStorage with a cookie fallback
+- Diagnostic audit log for copying the full input/output JSON to the clipboard when debugging
 
 ## Privacy
 
-Everything runs entirely in your browser. There's no backend and no
-analytics — your inputs are never sent anywhere except to your own
-browser's local storage (to remember your last session) or, if you use the
-"share link" button, into the URL you explicitly choose to share.
+Everything runs in your browser. There's no backend and no analytics. Inputs never go anywhere except your own browser's local storage (so it remembers your last session) or into a URL if you deliberately use the share link button.
 
 ## Project structure
 
 ```
 .
-├── index.html          # All UI markup and input controls
-├── app.js              # Entire financial model, chart rendering, and UI wiring
-├── style.css           # Styling (shared lineage with the companion FIRE calculator)
-├── Dockerfile           # nginx:alpine static file server
-├── docker-compose.yml   # Runs on port 8182
-└── vercel.json          # Security headers + caching for Vercel deployment
+├── index.html          UI markup and input controls
+├── app.js              the financial model, chart rendering, and UI wiring
+├── style.css           styling (shared lineage with the companion FIRE calculator)
+├── Dockerfile           nginx:alpine static file server
+├── docker-compose.yml   runs on port 8182
+└── vercel.json          security headers and caching for Vercel deployment
 ```
 
-There's no build step and no package.json — `app.js` is loaded directly by
-`index.html` as a plain `<script>` tag.
+No build step and no package.json. app.js is loaded directly by index.html as a plain script tag.
 
 ## Deployment
 
-**Docker:**
+Docker:
+
 ```bash
 docker compose up -d --build
 ```
-Serves on `http://localhost:8182` (nginx:alpine, static files).
 
-**Vercel:** connect the repo — `vercel.json` sets security headers and long
-cache lifetimes for `.css`/`.js`, with clean URLs enabled.
+Serves on http://localhost:8182 via nginx:alpine.
 
-**Anywhere else:** it's three static files (`index.html`, `app.js`,
-`style.css`) — drop them on any static host.
+Vercel: connect the repo. vercel.json sets security headers and long cache lifetimes for .css/.js, with clean URLs on.
 
-## Assumptions & limitations
+Anywhere else: it's three static files (index.html, app.js, style.css), so drop them on any static host.
 
-This is a decision-support tool, not financial advice. Notable
-simplifications, all disclosed in-app:
+## Assumptions and limitations
 
-- The mortgage interest rate is held constant for the whole horizon — no
-  rate resets or refinancing is modelled (the "Higher Interest Rate"
-  scenario card and Monte Carlo volatility partially compensate for this).
-- Stamp duty bands are approximate general (non-surcharge) owner-occupier
-  rates and change over time — always confirm with your state revenue
-  office.
-- The Medicare Levy Surcharge, HECS/HELP repayments, and superannuation are
-  not modelled — HECS in particular is deliberately excluded because it's a
-  differential model: since HECS is a function of income and doesn't differ
-  between renting and buying, it cancels out of the comparison entirely and
-  would only add UI complexity with zero effect on the verdict.
-- Utility cost differences and one-off body-corporate special levies are
-  assumed to be a wash between renting and owning.
-- The FY27 CGT reform and negative-gearing defaults model an *assumed*
-  future policy environment (per user-supplied legislative detail), not
-  confirmed enacted law at the time of writing — always verify current
-  rules before making a real decision.
+This is a decision support tool, not financial advice. A few simplifications worth knowing about, most of which are also disclosed in the app:
+
+- The mortgage rate is held constant for the whole horizon. No rate resets or refinancing are modelled, though the "Higher Interest Rate" scenario card and Monte Carlo volatility partially cover for that.
+- Stamp duty bands are approximate general owner occupier rates and change over time, so always check with your state revenue office.
+- The Medicare Levy Surcharge, HECS/HELP repayments, and superannuation aren't modelled. HECS in particular was left out on purpose: since it's a function of income and doesn't differ between renting and buying, it cancels out of a differential model like this one and would add UI complexity for zero effect on the verdict.
+- Utility cost differences and one-off body corporate special levies are assumed to be a wash between renting and owning.
+- The FY27 CGT reform and negative gearing defaults model an assumed future policy environment, not confirmed enacted law at time of writing, so double check current rules before making a real decision.
 
 ## License
 
-No license file included — treat as private/all-rights-reserved unless you
-add one.
+No license file included, so treat it as all rights reserved unless you add one.
