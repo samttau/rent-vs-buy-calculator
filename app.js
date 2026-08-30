@@ -876,8 +876,12 @@ function getInputs() {
 
 const charts = {};
 
+function isMobileView() {
+  return typeof window !== 'undefined' && window.innerWidth < 640;
+}
+
 Chart.defaults.font.family = "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif";
-Chart.defaults.font.size   = 11;
+Chart.defaults.font.size   = isMobileView() ? 10 : 11;
 Chart.defaults.color       = '#64748B';
 
 const msLinesPlugin = {
@@ -898,11 +902,11 @@ const msLinesPlugin = {
       ctx.lineTo(px, area.bottom);
       ctx.stroke();
       ctx.fillStyle = color;
-      ctx.font = '700 10px sans-serif';
+      ctx.font = '700 9.5px sans-serif';
       ctx.textAlign = 'left';
       ctx.translate(px, area.top);
       ctx.rotate(Math.PI / 2);
-      ctx.fillText(label, 6, -6);
+      ctx.fillText(label, 6, -5);
       ctx.restore();
     });
   },
@@ -914,6 +918,7 @@ function gc() { return isDark() ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
 function buildProjectionChart(rows, result, inp, mc) {
   const ctx = document.getElementById('chart-projection').getContext('2d');
   const isD = isDark();
+  const isM = isMobileView();
   const G = gc();
 
   const labels = ['Yr 0', ...rows.map(r => `Yr ${r.year}`)];
@@ -959,7 +964,7 @@ function buildProjectionChart(rows, result, inp, mc) {
   }
 
   datasets.push({
-    label: 'Owner Equity (Deterministic)',
+    label: 'Owner Equity',
     data: equityData,
     borderColor: isD ? '#34D399' : '#059669',
     backgroundColor: isD ? 'rgba(52, 211, 153, 0.15)' : 'rgba(5, 150, 105, 0.10)',
@@ -971,7 +976,7 @@ function buildProjectionChart(rows, result, inp, mc) {
   });
 
   datasets.push({
-    label: 'Renter Portfolio (Deterministic)',
+    label: 'Renter Portfolio',
     data: portData,
     borderColor: isD ? '#60A5FA' : '#2563EB',
     backgroundColor: isD ? 'rgba(96, 165, 250, 0.15)' : 'rgba(37, 99, 235, 0.10)',
@@ -1001,22 +1006,36 @@ function buildProjectionChart(rows, result, inp, mc) {
           position: 'bottom',
           labels: {
             filter: item => !item.text.includes('percentile'),
-            boxWidth: 12,
-            padding: 12,
-            font: { size: 11, weight: '600' },
+            boxWidth: 10,
+            padding: isM ? 8 : 12,
+            font: { size: isM ? 10 : 11, weight: '600' },
           },
         },
         tooltip: {
+          padding: 8,
+          bodyFont: { size: 11 },
           callbacks: {
             label: c => c.dataset.label.includes('percentile') ? '' : ` ${c.dataset.label}: ${fmt(c.parsed.y)}`,
           },
         },
       },
       scales: {
-        x: { grid: { color: G } },
+        x: {
+          grid: { color: G },
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: isM ? 6 : 10,
+            maxRotation: 0,
+            font: { size: isM ? 9.5 : 11 },
+          },
+        },
         y: {
           grid: { color: G },
-          ticks: { callback: v => v >= 1e6 ? '$' + (v / 1e6).toFixed(2) + 'M' : '$' + (v / 1000).toFixed(0) + 'K' },
+          ticks: {
+            callback: v => v >= 1e6 ? '$' + (v / 1e6).toFixed(1) + 'M' : '$' + (v / 1000).toFixed(0) + 'K',
+            maxTicksLimit: 6,
+            font: { size: isM ? 9.5 : 11 },
+          },
         },
       },
     },
@@ -1026,7 +1045,8 @@ function buildProjectionChart(rows, result, inp, mc) {
 function buildFinalChart(result) {
   const ctx = document.getElementById('chart-final').getContext('2d');
   const isD = isDark();
-  const labels = ['Buy (PPOR)', 'Rent & Invest'];
+  const isM = isMobileView();
+  const labels = ['Buy', 'Rent & Invest'];
   const colorNom = isD ? ['#34D399', '#60A5FA'] : ['#059669', '#2563EB'];
   const colorNpv = isD ? ['#6EE7B7', '#93C5FD'] : ['#10B981', '#3B82F6'];
 
@@ -1036,20 +1056,27 @@ function buildFinalChart(result) {
     data: {
       labels,
       datasets: [
-        { label: `Nominal (Year ${result.rows.length})`, data: [result.buyNet, result.rentNet], backgroundColor: colorNom.map(c => c + 'CC'), borderColor: colorNom, borderWidth: 1.5, borderRadius: 6 },
-        { label: "NPV (Today's $)", data: [result.npvBuy, result.npvRent], backgroundColor: colorNpv.map(c => c + 'CC'), borderColor: colorNpv, borderWidth: 1.5, borderRadius: 6 },
+        { label: `Nominal (Yr ${result.rows.length})`, data: [result.buyNet, result.rentNet], backgroundColor: colorNom.map(c => c + 'CC'), borderColor: colorNom, borderWidth: 1.5, borderRadius: 5 },
+        { label: "NPV (Today's $)", data: [result.npvBuy, result.npvRent], backgroundColor: colorNpv.map(c => c + 'CC'), borderColor: colorNpv, borderWidth: 1.5, borderRadius: 5 },
       ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { weight: '600' } } },
-        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } },
+        legend: { position: 'bottom', labels: { boxWidth: 10, padding: isM ? 6 : 10, font: { size: isM ? 10 : 11, weight: '600' } } },
+        tooltip: { padding: 8, callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } },
       },
       scales: {
-        x: { grid: { display: false } },
-        y: { grid: { color: gc() }, ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'K' } },
+        x: { grid: { display: false }, ticks: { font: { size: isM ? 10 : 11, weight: '600' } } },
+        y: {
+          grid: { color: gc() },
+          ticks: {
+            callback: v => v >= 1e6 ? '$' + (v / 1e6).toFixed(1) + 'M' : '$' + (v / 1000).toFixed(0) + 'K',
+            maxTicksLimit: 5,
+            font: { size: isM ? 9.5 : 11 },
+          },
+        },
       },
     },
   });
@@ -1058,8 +1085,9 @@ function buildFinalChart(result) {
 function buildOwnCostChart(row) {
   const ctx = document.getElementById('chart-owncost').getContext('2d');
   const isD = isDark();
+  const isM = isMobileView();
   const raw = [row.annualRepayment, row.maint, row.rates, row.ownerIns, row.landTax || 0];
-  const labels = ['Mortgage Repayments', 'Maintenance', 'Rates / Strata', 'Building Insurance', 'Land Tax'];
+  const labels = ['Mortgage', 'Maintenance', 'Rates/Strata', 'Insurance', 'Land Tax'];
   const colors = isD ? ['#34D399', '#F87171', '#FBBF24', '#60A5FA', '#A78BFA'] : ['#059669', '#DC2626', '#D97706', '#2563EB', '#7C3AED'];
   const vals = raw.map((v, i) => ({ v, l: labels[i], c: colors[i] })).filter(x => x.v > 0);
   const grossCost = vals.reduce((s, x) => s + x.v, 0);
@@ -1067,13 +1095,31 @@ function buildOwnCostChart(row) {
   if (charts.owncost) charts.owncost.destroy();
   charts.owncost = new Chart(ctx, {
     type: 'doughnut',
-    data: { labels: vals.map(x => x.l), datasets: [{ data: vals.map(x => x.v), backgroundColor: vals.map(x => x.c + 'DD'), borderColor: vals.map(x => x.c), borderWidth: 2, hoverOffset: 6 }] },
+    data: {
+      labels: vals.map(x => x.l),
+      datasets: [{
+        data: vals.map(x => x.v),
+        backgroundColor: vals.map(x => x.c + 'DD'),
+        borderColor: vals.map(x => x.c),
+        borderWidth: 1.5,
+        hoverOffset: 4,
+      }],
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      cutout: '58%',
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 10, padding: 8 } },
-        tooltip: { callbacks: { label: c => ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / Math.max(1, grossCost) * 100).toFixed(0)}%)` } },
+        legend: {
+          position: 'bottom',
+          labels: { boxWidth: 8, padding: isM ? 5 : 8, font: { size: isM ? 9.5 : 10.5 } },
+        },
+        tooltip: {
+          padding: 8,
+          callbacks: {
+            label: c => ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / Math.max(1, grossCost) * 100).toFixed(0)}%)`,
+          },
+        },
       },
     },
   });
@@ -1082,6 +1128,7 @@ function buildOwnCostChart(row) {
 function buildGapChart(rows) {
   const ctx = document.getElementById('chart-gap').getContext('2d');
   const isD = isDark();
+  const isM = isMobileView();
   const G = gc();
 
   if (charts.gap) charts.gap.destroy();
@@ -1095,7 +1142,7 @@ function buildGapChart(rows) {
         backgroundColor: rows.map(r => r.gap >= 0 ? (isD ? 'rgba(96,165,250,0.7)' : 'rgba(37,99,235,0.7)') : (isD ? 'rgba(52,211,153,0.7)' : 'rgba(5,150,105,0.7)')),
         borderColor: rows.map(r => r.gap >= 0 ? (isD ? '#60A5FA' : '#2563EB') : (isD ? '#34D399' : '#059669')),
         borderWidth: 1,
-        borderRadius: 3,
+        borderRadius: 2,
       }],
     },
     options: {
@@ -1103,11 +1150,31 @@ function buildGapChart(rows) {
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: c => ` ${fmt(c.parsed.y)}/yr ${c.parsed.y >= 0 ? '(Renter saves difference)' : '(Buyer saves difference)'}` } },
+        tooltip: {
+          padding: 8,
+          callbacks: {
+            label: c => ` ${fmt(c.parsed.y)}/yr ${c.parsed.y >= 0 ? '(Renter saves gap)' : '(Buyer saves gap)'}`,
+          },
+        },
       },
       scales: {
-        x: { grid: { display: false } },
-        y: { grid: { color: G }, ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'K' } },
+        x: {
+          grid: { display: false },
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: isM ? 6 : 10,
+            maxRotation: 0,
+            font: { size: isM ? 9.5 : 11 },
+          },
+        },
+        y: {
+          grid: { color: G },
+          ticks: {
+            callback: v => '$' + (v / 1000).toFixed(0) + 'K',
+            maxTicksLimit: 5,
+            font: { size: isM ? 9.5 : 11 },
+          },
+        },
       },
     },
   });
@@ -1116,6 +1183,7 @@ function buildGapChart(rows) {
 function buildEquityChart(rows) {
   const ctx = document.getElementById('chart-equity').getContext('2d');
   const isD = isDark();
+  const isM = isMobileView();
   const G = gc();
 
   if (charts.equity) charts.equity.destroy();
@@ -1133,12 +1201,27 @@ function buildEquityChart(rows) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
-        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } },
+        legend: { position: 'bottom', labels: { boxWidth: 10, padding: isM ? 6 : 10, font: { size: isM ? 10 : 11 } } },
+        tooltip: { padding: 8, callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } },
       },
       scales: {
-        x: { grid: { color: G } },
-        y: { grid: { color: G }, ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'K' } },
+        x: {
+          grid: { color: G },
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: isM ? 6 : 10,
+            maxRotation: 0,
+            font: { size: isM ? 9.5 : 11 },
+          },
+        },
+        y: {
+          grid: { color: G },
+          ticks: {
+            callback: v => v >= 1e6 ? '$' + (v / 1e6).toFixed(1) + 'M' : '$' + (v / 1000).toFixed(0) + 'K',
+            maxTicksLimit: 6,
+            font: { size: isM ? 9.5 : 11 },
+          },
+        },
       },
     },
   });
@@ -1598,13 +1681,43 @@ function _calc() {
 }
 
 // ══════════════════════════════════════════════════════════
-//  INIT
+//  INIT & RESPONSIVE EVENT LISTENERS
 // ══════════════════════════════════════════════════════════
+
+let resizeDebounce;
+function handleResize() {
+  clearTimeout(resizeDebounce);
+  resizeDebounce = setTimeout(() => {
+    Chart.defaults.font.size = isMobileView() ? 10 : 11;
+    if (_lastResult && _lastRows.length && _lastInp) {
+      buildProjectionChart(_lastRows, _lastResult, _lastInp, _lastMc);
+      buildFinalChart(_lastResult);
+      if (_lastRows[0]) buildOwnCostChart(_lastRows[0]);
+      buildGapChart(_lastRows);
+      buildEquityChart(_lastRows);
+    }
+  }, 120);
+}
 
 function initUX() {
   document.querySelectorAll('input[type="number"]').forEach(el => {
     el.addEventListener('focus', function () { this.select(); });
   });
+
+  // Touch listener for tooltips on mobile
+  document.querySelectorAll('.tooltip-wrap').forEach(wrap => {
+    wrap.addEventListener('click', e => {
+      e.stopPropagation();
+      document.querySelectorAll('.tooltip-wrap').forEach(w => { if (w !== wrap) w.classList.remove('active'); });
+      wrap.classList.toggle('active');
+    });
+  });
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.tooltip-wrap.active').forEach(w => w.classList.remove('active'));
+  });
+
+  window.addEventListener('resize', handleResize);
+  window.addEventListener('orientationchange', handleResize);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
