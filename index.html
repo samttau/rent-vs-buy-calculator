@@ -10,41 +10,41 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmO5GE1" crossorigin="anonymous"></script>
 </head>
 <body>
 
 <header>
   <div class="header-inner">
     <div class="header-brand">
-      <div class="header-icon">🏡</div>
+      <div class="header-icon" aria-hidden="true">🏡</div>
       <div>
         <h1>Australian Rent vs Buy Calculator</h1>
-        <p>Comprehensive Differential Cash-Flow &amp; Wealth Engine · FY 2025–26 Rules</p>
+        <p id="header-subtitle">Differential Cash-Flow &amp; Wealth Engine · ATO FY 2025–26 Tax Brackets · FY27 CGT Rules</p>
       </div>
     </div>
     <div class="header-right">
-      <div class="header-pills">
-        <span class="pill pill-buy">Buy (PPOR)</span>
+      <div class="header-pills" aria-hidden="true">
+        <span class="pill pill-buy" id="header-buy-pill">Buy (PPOR)</span>
         <span class="pill pill-rent">Rent &amp; Invest</span>
         <span class="pill pill-breakeven">Break-even</span>
         <span class="pill pill-verdict" id="header-horizon-pill">10yr Outcome</span>
       </div>
       <div class="header-controls">
-        <button class="ctrl-btn" onclick="exportCSV()" title="Export everything — inputs, summary, scenarios, break-even report and year-by-year projection — as one CSV" aria-label="Export CSV">⬇ CSV</button>
-        <button class="ctrl-btn" onclick="copyAuditLogs()" title="Copy diagnostic audit logs to clipboard" aria-label="Copy Audit Logs">📋 Logs</button>
-        <button class="ctrl-btn" id="share-btn" onclick="shareLink()" title="Copy a shareable link with your current inputs" aria-label="Share Link">🔗 Share</button>
-        <button class="ctrl-btn" id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode" aria-label="Toggle Dark Mode">🌙</button>
-        <button class="ctrl-btn" onclick="resetDefaults()" title="Reset all inputs to defaults" aria-label="Reset Defaults">↺</button>
+        <button type="button" class="ctrl-btn" onclick="exportCSV()" title="Export everything — inputs, summary, scenarios, break-even report and year-by-year projection — as one CSV" aria-label="Export CSV">⬇ CSV</button>
+        <button type="button" class="ctrl-btn" id="logs-btn" onclick="copyAuditLogs()" title="Copy diagnostic audit logs to clipboard" aria-label="Copy Audit Logs">📋 Logs</button>
+        <button type="button" class="ctrl-btn" id="share-btn" onclick="shareLink()" title="Copy a shareable link with your current inputs" aria-label="Share Link">🔗 Share</button>
+        <button type="button" class="ctrl-btn" id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode" aria-label="Toggle Dark Mode">🌙</button>
+        <button type="button" class="ctrl-btn" id="reset-btn" onclick="resetDefaults()" title="Reset all inputs to defaults (click twice to confirm)" aria-label="Reset Defaults">↺</button>
       </div>
     </div>
   </div>
 </header>
 
 <!-- Mobile Navigation Bar -->
-<div class="mobile-tab-nav" id="mobile-tab-nav">
-  <button class="mobile-tab-btn active" id="tab-btn-inputs" onclick="switchMobileTab('inputs')">⚙️ Calculator Inputs</button>
-  <button class="mobile-tab-btn" id="tab-btn-results" onclick="switchMobileTab('results')">📊 Analysis &amp; Charts</button>
+<div class="mobile-tab-nav" id="mobile-tab-nav" role="tablist" aria-label="Calculator views">
+  <button type="button" class="mobile-tab-btn active" id="tab-btn-inputs" role="tab" aria-selected="true" aria-controls="input-panel" onclick="switchMobileTab('inputs')">⚙️ Calculator Inputs</button>
+  <button type="button" class="mobile-tab-btn" id="tab-btn-results" role="tab" aria-selected="false" aria-controls="results-panel" onclick="switchMobileTab('results')">📊 Analysis &amp; Charts</button>
 </div>
 
 <div class="app">
@@ -56,23 +56,23 @@
     <div class="preset-section">
       <div class="preset-title">📍 Australian City Benchmark Presets</div>
       <div class="preset-grid">
-        <button type="button" class="preset-btn" onclick="applyCityPreset('sydney')">🏙️ Sydney</button>
-        <button type="button" class="preset-btn" onclick="applyCityPreset('melbourne')">☕ Melbourne</button>
-        <button type="button" class="preset-btn" onclick="applyCityPreset('brisbane')">🌴 Brisbane</button>
-        <button type="button" class="preset-btn" onclick="applyCityPreset('perth')">☀️ Perth</button>
-        <button type="button" class="preset-btn" onclick="applyCityPreset('adelaide')">🍷 Adelaide</button>
-        <button type="button" class="preset-btn" onclick="applyCityPreset('canberra')">🏛️ Canberra</button>
+        <button type="button" class="preset-btn" aria-pressed="false" onclick="applyCityPreset('sydney')">🏙️ Sydney</button>
+        <button type="button" class="preset-btn" aria-pressed="false" onclick="applyCityPreset('melbourne')">☕ Melbourne</button>
+        <button type="button" class="preset-btn" aria-pressed="false" onclick="applyCityPreset('brisbane')">🌴 Brisbane</button>
+        <button type="button" class="preset-btn" aria-pressed="false" onclick="applyCityPreset('perth')">☀️ Perth</button>
+        <button type="button" class="preset-btn" aria-pressed="false" onclick="applyCityPreset('adelaide')">🍷 Adelaide</button>
+        <button type="button" class="preset-btn" aria-pressed="false" onclick="applyCityPreset('canberra')">🏛️ Canberra</button>
       </div>
     </div>
 
     <!-- Horizon & Profile -->
     <div class="section" id="sec-profile">
-      <div class="section-header" onclick="toggleSection('sec-profile')">
-        <span class="section-icon">👤</span>
-        <h3>Horizon &amp; Profile</h3>
-        <span class="section-chevron">▾</span>
-      </div>
-      <div class="section-content">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-profile-content" onclick="toggleSection('sec-profile')">
+        <span class="section-icon" aria-hidden="true">👤</span>
+        <span class="section-title">Horizon &amp; Profile</span>
+        <span class="section-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="section-content" id="sec-profile-content">
         <div class="field">
           <label for="years">Analysis Horizon (years) <span class="val" id="lbl-years">10 yrs</span></label>
           <div class="range-num-row">
@@ -83,25 +83,28 @@
           </div>
         </div>
         <div class="field">
-          <label for="totalSavings">Total Savings Now
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">All the cash/liquid investments you have today. The buying deposit (plus unfinanced stamp duty/legal/LMI) is funded from this; any remainder becomes the buyer's surplus (offset or ETF). The renter invests 100% of this amount from day one.</span></div>
-          </label>
-          <div class="input-prefix"><span>$</span><input type="number" id="totalSavings" value="160000" min="0" step="5000" oninput="calc()"></div>
+          <div class="label-row">
+            <label for="totalSavings">Total Savings Now</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About total savings">?</button><span class="tooltip-text">All the cash/liquid investments you have today. The buying deposit (plus unfinanced stamp duty/legal/LMI) is funded from this; any remainder becomes the buyer's surplus (offset or ETF). The renter invests total savings less refundable bond from day one.</span></span>
+          </div>
+          <div class="input-prefix"><span>$</span><input type="number" id="totalSavings" value="200000" min="0" step="5000" oninput="calc()"></div>
           <div class="hint" id="savings-breakdown-hint"></div>
         </div>
         <div class="field">
-          <label for="surplusDestination">Surplus savings destination (buy scenario)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Where the buyer's leftover cash sits. Offset: reduces interest-bearing mortgage balance — a guaranteed, tax-free return equal to your mortgage rate. ETF: stays invested alongside renter's portfolio (taxed annually and via CGT at exit).</span></div>
-          </label>
+          <div class="label-row">
+            <label for="surplusDestination">Surplus savings destination (buy scenario)</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About surplus destination">?</button><span class="tooltip-text">Where the buyer's upfront and ongoing cash surpluses sit. Offset: reduces interest-bearing mortgage balance — a guaranteed, tax-free return equal to your mortgage rate. ETF: stays invested alongside renter's portfolio (taxed annually and via CGT at exit).</span></span>
+          </div>
           <select id="surplusDestination" onchange="calc()" aria-label="Surplus savings destination">
             <option value="offset">Mortgage offset account (tax-free, guaranteed)</option>
             <option value="etf">Invest in ETFs (taxed, market-dependent)</option>
           </select>
         </div>
         <div class="field">
-          <label for="taxRateMethod">Tax rate method
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">"From income" dynamically derives your marginal rate each year from the ATO 2025-26 brackets (incl. 2% Medicare Levy) applied to your gross salary (with optional inflation indexation). "Flat rate" uses a static rate for the entire horizon.</span></div>
-          </label>
+          <div class="label-row">
+            <label for="taxRateMethod">Tax rate method</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About tax rate method">?</button><span class="tooltip-text">"From income" dynamically derives your marginal rate each year from the ATO 2025-26 brackets (incl. 2% Medicare Levy) applied to your gross salary (with optional inflation indexation). "Flat rate" uses a static rate for the entire horizon.</span></span>
+          </div>
           <select id="taxRateMethod" onchange="toggleVis('flat-tax-field', this.value==='flat');toggleVis('income-tax-fields', this.value==='income');calc()" aria-label="Tax rate method">
             <option value="income">From income (ATO brackets, FY 2025-26)</option>
             <option value="flat">Flat rate</option>
@@ -109,24 +112,29 @@
         </div>
         <div id="income-tax-fields">
           <div class="field">
-            <label for="grossSalary">Gross Annual Salary
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Your total pre-tax salary today. Used to compute your marginal tax rate (incl. Medicare Levy) from the ATO brackets.</span></div>
-            </label>
+            <div class="label-row">
+              <label for="grossSalary">Gross Annual Salary</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About gross annual salary">?</button><span class="tooltip-text">Your total pre-tax salary today. Used to compute your marginal tax rate (incl. Medicare Levy) and progressive CGT stacking from the ATO brackets.</span></span>
+            </div>
             <div class="input-prefix"><span>$</span><input type="number" id="grossSalary" value="110000" min="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="toggle-row">
-            <span class="toggle-label">Salary grows with inflation
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">If enabled, salary rises with general inflation each year, tracking potential bracket creep. If off, nominal salary remains flat.</span></div>
+            <span class="toggle-text-wrap">
+              <label class="toggle-label" for="salaryGrowth">Salary grows with inflation</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About salary inflation growth">?</button><span class="tooltip-text">If enabled, salary rises with general inflation each year, tracking potential bracket creep. If off, nominal salary remains flat.</span></span>
             </span>
             <label class="toggle"><input type="checkbox" id="salaryGrowth" checked oninput="calc()" aria-label="Salary grows with inflation"><span class="toggle-slider"></span></label>
           </div>
           <div class="hint" id="tax-rate-hint"></div>
         </div>
         <div class="field" id="flat-tax-field" style="display:none">
-          <label for="taxRate">Marginal Tax Rate (incl. Medicare)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Top marginal rate including 2% Medicare Levy. Used for CGT, dividend franking top-up/refund and negative gearing deductions.</span></div>
-            <span class="val" id="lbl-taxrate">32%</span>
-          </label>
+          <div class="label-row">
+            <label for="taxRate">Marginal Tax Rate (incl. Medicare)</label>
+            <span class="label-right">
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About marginal tax rate">?</button><span class="tooltip-text">Top marginal rate including 2% Medicare Levy. Used for CGT, dividend franking top-up/refund and negative gearing deductions.</span></span>
+              <span class="val" id="lbl-taxrate">32%</span>
+            </span>
+          </div>
           <div class="range-num-row">
             <input type="range" id="taxRate" min="0" max="47" step="1" value="32" aria-label="Marginal tax rate percent"
               oninput="syncDualInput('taxRate', 'taxRateNum', 'lbl-taxrate', '', '%');calc()">
@@ -135,9 +143,10 @@
           </div>
         </div>
         <div class="field">
-          <label for="state">State / Territory
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Used for stamp duty auto-estimation and first home buyer concessions.</span></div>
-          </label>
+          <div class="label-row">
+            <label for="state">State / Territory</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About state selection">?</button><span class="tooltip-text">Used for stamp duty auto-estimation and first home buyer concessions.</span></span>
+          </div>
           <select id="state" onchange="autoStampDuty();calc()" aria-label="State or territory">
             <option value="NSW">NSW (New South Wales)</option>
             <option value="VIC">VIC (Victoria)</option>
@@ -150,8 +159,9 @@
           </select>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label">First home buyer (concessions apply)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Applies state-specific first home buyer stamp duty exemptions/concessions in the calculation.</span></div>
+          <span class="toggle-text-wrap">
+            <label class="toggle-label" for="firstHomeBuyer">First home buyer (concessions apply)</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About first home buyer concessions">?</button><span class="tooltip-text">Applies state-specific first home buyer stamp duty exemptions/concessions for owner-occupied homes.</span></span>
           </span>
           <label class="toggle"><input type="checkbox" id="firstHomeBuyer" oninput="autoStampDuty();calc()" aria-label="First home buyer toggle"><span class="toggle-slider"></span></label>
         </div>
@@ -160,25 +170,25 @@
 
     <!-- Buying -->
     <div class="section" id="sec-buy">
-      <div class="section-header" onclick="toggleSection('sec-buy')">
-        <span class="section-icon">🏠</span>
-        <h3>Buying</h3>
-        <span class="section-chevron">▾</span>
-      </div>
-      <div class="section-content">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-buy-content" onclick="toggleSection('sec-buy')">
+        <span class="section-icon" aria-hidden="true">🏠</span>
+        <span class="section-title">Buying</span>
+        <span class="section-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="section-content" id="sec-buy-content">
         <div class="field">
           <label for="propertyPrice">Property Purchase Price</label>
           <div class="input-prefix"><span>$</span><input type="number" id="propertyPrice" value="800000" min="0" step="5000" oninput="autoStampDuty();calc()"></div>
         </div>
         <div class="input-row">
           <div class="field">
-            <label for="deposit">Deposit
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Cash put down upfront from Total Savings. Clamped so deposit + unfinanced upfront costs never exceed Total Savings.</span></div>
-            </label>
+            <div class="label-row">
+              <label for="deposit">Deposit</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About deposit">?</button><span class="tooltip-text">Cash put down upfront from Total Savings. Clamped so deposit + unfinanced upfront costs never exceed Total Savings.</span></span>
+            </div>
             <div class="input-prefix"><span>$</span><input type="number" id="deposit" value="160000" min="0" step="5000" oninput="calc()"></div>
           </div>
-          <div class="field">
-            <label>&nbsp;</label>
+          <div class="field action-field">
             <button type="button" class="mini-btn" style="width:100%" onclick="setMinDeposit()" title="Sets deposit to 20% of property price — the minimum to avoid Lenders Mortgage Insurance">20% Deposit (No LMI)</button>
           </div>
         </div>
@@ -186,24 +196,22 @@
         <div class="hint" id="deposit-savings-hint"></div>
         <div class="input-row">
           <div class="field">
-            <label for="lmiAmount">Lenders Mortgage Insurance (LMI)
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">One-off premium required by lenders when loan exceeds 80% LVR. $0 if deposit >= 20%.</span></div>
-            </label>
+            <div class="label-row">
+              <label for="lmiAmount">Lenders Mortgage Insurance (LMI)</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About LMI">?</button><span class="tooltip-text">One-off premium required by lenders when loan exceeds 80% LVR. $0 if LVR &le; 80%.</span></span>
+            </div>
             <div class="input-prefix"><span>$</span><input type="number" id="lmiAmount" value="0" min="0" step="500" oninput="calc()"></div>
           </div>
-          <div class="field">
-            <label>&nbsp;</label>
+          <div class="field action-field">
             <button type="button" class="mini-btn" style="width:100%" onclick="autoLMI()">Auto-estimate</button>
           </div>
         </div>
-        <div class="input-row">
-          <div class="field">
-            <label for="financeLMI">LMI payment method</label>
-            <select id="financeLMI" onchange="calc()" aria-label="LMI payment method">
-              <option value="yes">Yes — capitalise into loan</option>
-              <option value="no">No — pay in cash upfront</option>
-            </select>
-          </div>
+        <div class="field">
+          <label for="financeLMI">LMI payment method</label>
+          <select id="financeLMI" onchange="calc()" aria-label="LMI payment method">
+            <option value="yes">Yes — capitalise into loan</option>
+            <option value="no">No — pay in cash upfront</option>
+          </select>
         </div>
         <div class="field">
           <label for="propertyGrowth">Property Capital Growth (% p.a.) <span class="val" id="lbl-propgrowth">4.0%</span></label>
@@ -216,26 +224,29 @@
         </div>
         <div class="input-row">
           <div class="field">
-            <label for="stampDuty">Stamp Duty
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">State transfer duty based on property price, state, and first-home-buyer status.</span></div>
-            </label>
+            <div class="label-row">
+              <label for="stampDuty">Stamp Duty</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About stamp duty">?</button><span class="tooltip-text">State transfer duty based on property price, state, owner/investor status, and first-home-buyer concessions.</span></span>
+            </div>
             <div class="input-prefix"><span>$</span><input type="number" id="stampDuty" value="32000" min="0" step="500" oninput="calc()"></div>
           </div>
-          <div class="field">
-            <label>&nbsp;</label>
+          <div class="field action-field">
             <button type="button" class="mini-btn" style="width:100%" onclick="autoStampDuty()">Auto-estimate</button>
           </div>
         </div>
+        <div class="hint" id="stamp-duty-hint"></div>
         <div class="toggle-row">
-          <span class="toggle-label">Finance stamp duty (add to loan)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">If off, stamp duty + legal fees are paid from upfront cash. If on, added to the loan balance.</span></div>
+          <span class="toggle-text-wrap">
+            <label class="toggle-label" for="financeStampDuty">Finance stamp duty (add to loan)</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About financing stamp duty">?</button><span class="tooltip-text">If off, stamp duty + legal fees are paid from upfront cash. If on, added to the loan balance.</span></span>
           </span>
           <label class="toggle"><input type="checkbox" id="financeStampDuty" oninput="calc()" aria-label="Finance stamp duty"><span class="toggle-slider"></span></label>
         </div>
         <div class="field">
-          <label for="fhogAmount">First Home Owner Grant (FHOG)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Direct state cash grant for eligible first home buyers (usually new builds). Reduces day-1 cash outlay.</span></div>
-          </label>
+          <div class="label-row">
+            <label for="fhogAmount">First Home Owner Grant (FHOG)</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About FHOG">?</button><span class="tooltip-text">Direct state cash grant for eligible first home buyers (usually new builds). Reduces day-1 cash outlay.</span></span>
+          </div>
           <div class="input-prefix"><span>$</span><input type="number" id="fhogAmount" value="0" min="0" step="1000" oninput="calc()"></div>
         </div>
         <div class="input-row">
@@ -290,15 +301,17 @@
         </div>
         <div class="input-row">
           <div class="field">
-            <label for="councilRates">Council Rates (annual, today's $)
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Annual council municipal rates. Indexed to general inflation.</span></div>
-            </label>
+            <div class="label-row">
+              <label for="councilRates">Council Rates (annual, today's $)</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About council rates">?</button><span class="tooltip-text">Annual council municipal rates. Indexed to general inflation.</span></span>
+            </div>
             <div class="input-prefix"><span>$</span><input type="number" id="councilRates" value="2500" min="0" step="100" oninput="calc()"></div>
           </div>
           <div class="field">
-            <label for="bodyCorp">Body Corp / Strata (annual, today's $)
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">$0 for standalone houses. Stratas/apartments carry building levies with custom growth rates.</span></div>
-            </label>
+            <div class="label-row">
+              <label for="bodyCorp">Body Corp / Strata (annual, today's $)</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About body corp strata">?</button><span class="tooltip-text">$0 for standalone houses. Stratas/apartments carry building levies with custom growth rates.</span></span>
+            </div>
             <div class="input-prefix"><span>$</span><input type="number" id="bodyCorp" value="1000" min="0" step="100" oninput="calc()"></div>
           </div>
         </div>
@@ -320,12 +333,12 @@
 
     <!-- Renting -->
     <div class="section" id="sec-rent">
-      <div class="section-header" onclick="toggleSection('sec-rent')">
-        <span class="section-icon">🔑</span>
-        <h3>Renting</h3>
-        <span class="section-chevron">▾</span>
-      </div>
-      <div class="section-content">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-rent-content" onclick="toggleSection('sec-rent')">
+        <span class="section-icon" aria-hidden="true">🔑</span>
+        <span class="section-title">Renting</span>
+        <span class="section-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="section-content" id="sec-rent-content">
         <div class="field">
           <label for="weeklyRent">Weekly Rent (equivalent property)</label>
           <div class="input-prefix"><span>$</span><input type="number" id="weeklyRent" value="650" min="0" step="10" oninput="calc()"></div>
@@ -352,12 +365,12 @@
 
     <!-- Investing the difference -->
     <div class="section" id="sec-invest">
-      <div class="section-header" onclick="toggleSection('sec-invest')">
-        <span class="section-icon">📈</span>
-        <h3>Investing the Difference</h3>
-        <span class="section-chevron">▾</span>
-      </div>
-      <div class="section-content">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-invest-content" onclick="toggleSection('sec-invest')">
+        <span class="section-icon" aria-hidden="true">📈</span>
+        <span class="section-title">Investing the Difference</span>
+        <span class="section-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="section-content" id="sec-invest-content">
         <div class="expenses-note">If renting costs less than owning in any year, the renter invests the difference into a diversified ETF portfolio. If owning costs less, the buyer invests their surplus into mortgage offset or ETFs.</div>
         <div class="field">
           <label for="investReturn">Total Investment Return (% p.a.) <span class="val" id="lbl-invret">7.5%</span></label>
@@ -369,10 +382,13 @@
           </div>
         </div>
         <div class="field">
-          <label for="dividendYield">Dividend / Distribution Yield (% p.a.)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Portion of total return paid out as distributions annually (taxed each year with franking credits). Remainder is capital growth (taxed via CGT only at exit).</span></div>
-            <span class="val" id="lbl-divyield">3.0%</span>
-          </label>
+          <div class="label-row">
+            <label for="dividendYield">Dividend / Distribution Yield (% p.a.)</label>
+            <span class="label-right">
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About dividend yield">?</button><span class="tooltip-text">Portion of total return paid out as distributions annually (taxed each year with franking credits). Remainder is capital growth (taxed via CGT only at exit).</span></span>
+              <span class="val" id="lbl-divyield">3.0%</span>
+            </span>
+          </div>
           <div class="range-num-row">
             <input type="range" id="dividendYield" min="0" max="8" step="0.25" value="3.0" aria-label="Dividend yield percent"
               oninput="syncDualInput('dividendYield', 'dividendYieldNum', 'lbl-divyield', '', '%');calc()">
@@ -382,10 +398,13 @@
           <div class="cap-warning" id="divyield-warn">⚠ Dividend yield exceeds Total Investment Return — implies the fund's price is declining while paying cash distributions</div>
         </div>
         <div class="field">
-          <label for="frankingLevel">Franking Level (% of dividends fully franked)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Australian shares carry 30% company tax franking credits. 100% for ASX200 index; 0% for international index funds. Refundable if marginal rate &lt; 30%.</span></div>
-            <span class="val" id="lbl-franking">70%</span>
-          </label>
+          <div class="label-row">
+            <label for="frankingLevel">Franking Level (% fully franked)</label>
+            <span class="label-right">
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About franking level">?</button><span class="tooltip-text">Australian shares carry 30% company tax franking credits. 100% for ASX200 index; 0% for international index funds. Refundable if marginal rate &lt; 30%.</span></span>
+              <span class="val" id="lbl-franking">70%</span>
+            </span>
+          </div>
           <div class="range-num-row">
             <input type="range" id="frankingLevel" min="0" max="100" step="5" value="70" aria-label="Franking level percent"
               oninput="syncDualInput('frankingLevel', 'frankingLevelNum', 'lbl-franking', '', '%');calc()">
@@ -394,10 +413,13 @@
           </div>
         </div>
         <div class="field">
-          <label for="etfSellFeeRate">ETF Exit Fee (% brokerage / spread on sale)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Brokerage/platform cost to liquidate the portfolio at exit — mirrors selling agent fees on property.</span></div>
-            <span class="val" id="lbl-etfsell">0.1%</span>
-          </label>
+          <div class="label-row">
+            <label for="etfSellFeeRate">ETF Exit Fee (% brokerage / spread)</label>
+            <span class="label-right">
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About ETF exit fee">?</button><span class="tooltip-text">Brokerage/platform cost to liquidate the portfolio at exit — mirrors selling agent fees on property.</span></span>
+              <span class="val" id="lbl-etfsell">0.1%</span>
+            </span>
+          </div>
           <div class="range-num-row">
             <input type="range" id="etfSellFeeRate" min="0" max="2" step="0.05" value="0.1" aria-label="ETF exit fee percent"
               oninput="syncDualInput('etfSellFeeRate', 'etfSellFeeRateNum', 'lbl-etfsell', '', '%');calc()">
@@ -410,18 +432,20 @@
 
     <!-- Policy & Advanced Assumptions -->
     <div class="section collapsed" id="sec-assumptions">
-      <div class="section-header" onclick="toggleSection('sec-assumptions')">
-        <span class="section-icon">⚙️</span>
-        <h3>Policy &amp; Advanced Assumptions</h3>
-        <span class="section-chevron">▾</span>
-      </div>
-      <div class="section-content">
-        <div class="expenses-note"><strong>FY 2026–27 policy baseline:</strong> negative gearing is assumed abolished for all properties from FY27 (default below — toggle on only to compare against legacy current-law rules), and your principal place of residence (PPOR) is fully exempt from CGT.</div>
+      <button type="button" class="section-header" aria-expanded="false" aria-controls="sec-assumptions-content" onclick="toggleSection('sec-assumptions')">
+        <span class="section-icon" aria-hidden="true">⚙️</span>
+        <span class="section-title">Policy &amp; Advanced Assumptions</span>
+        <span class="section-badge" id="policy-badge">FY27 CGT · Vol 10%</span>
+        <span class="section-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="section-content" id="sec-assumptions-content">
+        <div class="expenses-note"><strong>FY 2026–27 policy baseline:</strong> negative gearing is assumed abolished for investment properties (default below — toggle on to compare against legacy rules), ETFs use CPI indexation + 30% minimum tax floor, and your principal place of residence (PPOR) remains fully CGT exempt.</div>
         <div class="toggle-row">
-          <span class="toggle-label">Treat as investment property
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">If on, the property is tenanted (not lived in) and you pay rent elsewhere. Enables rental income and negative gearing settings.</span></div>
+          <span class="toggle-text-wrap">
+            <label class="toggle-label" for="isInvestmentProperty">Treat as investment property</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About investment property mode">?</button><span class="tooltip-text">If on, the property is tenanted (not lived in) and you pay rent elsewhere in both scenarios. Enables rental income, deductible loan interest, and property CGT.</span></span>
           </span>
-          <label class="toggle"><input type="checkbox" id="isInvestmentProperty" onchange="toggleVis('investment-fields', this.checked);calc()" aria-label="Treat as investment property"><span class="toggle-slider"></span></label>
+          <label class="toggle"><input type="checkbox" id="isInvestmentProperty" onchange="onInvestmentPropertyToggle(this.checked)" aria-label="Treat as investment property"><span class="toggle-slider"></span></label>
         </div>
         <div id="investment-fields" style="display:none">
           <div class="field">
@@ -430,73 +454,85 @@
           </div>
           <div class="input-row">
             <div class="field">
-              <label for="vacancyWeeks">Vacancy Allowance (weeks/yr unlet)
-                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Weeks per year property is vacant between tenants.</span></div>
-              </label>
+              <div class="label-row">
+                <label for="vacancyWeeks">Vacancy Allowance (weeks/yr)</label>
+                <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About vacancy allowance">?</button><span class="tooltip-text">Weeks per year property is vacant between tenants.</span></span>
+              </div>
               <input type="number" id="vacancyWeeks" value="2" min="0" max="52" step="1" oninput="calc()">
             </div>
             <div class="field">
-              <label for="propertyManagementRate">Property Management Fee (% of rent)
-                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Agent fee for managing the tenancy (typically 5–8%).</span></div>
-              </label>
+              <div class="label-row">
+                <label for="propertyManagementRate">Management Fee (% rent)</label>
+                <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About property management fee">?</button><span class="tooltip-text">Agent fee for managing the tenancy (typically 5–8%).</span></span>
+              </div>
               <input type="number" id="propertyManagementRate" value="7" min="0" max="15" step="0.5" oninput="calc()">
             </div>
           </div>
           <div class="field">
-            <label for="landTax">Land Tax (annual, today's $)
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">State land tax on investment properties above threshold. Not charged on PPOR.</span></div>
-            </label>
+            <div class="label-row">
+              <label for="landTax">Land Tax (annual, today's $)</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About land tax">?</button><span class="tooltip-text">State land tax on investment properties above threshold. Not charged on PPOR.</span></span>
+            </div>
             <div class="input-prefix"><span>$</span><input type="number" id="landTax" value="0" min="0" step="100" oninput="calc()"></div>
           </div>
           <div class="field">
-            <label for="depreciationDeduction">Depreciation Deduction (annual, today's $)
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Non-cash building (Div 43) and fixtures (Div 40) depreciation reducing taxable loss/gain.</span></div>
-            </label>
+            <div class="label-row">
+              <label for="depreciationDeduction">Depreciation Deduction (annual $)</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About depreciation deduction">?</button><span class="tooltip-text">Non-cash building (Div 43) and fixtures (Div 40) depreciation reducing taxable rental income/loss.</span></span>
+            </div>
             <div class="input-prefix"><span>$</span><input type="number" id="depreciationDeduction" value="0" min="0" step="500" oninput="calc()"></div>
           </div>
           <div class="toggle-row">
-            <span class="toggle-label">Allow negative gearing
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Switch on to compare against legacy rules where net rental losses offset salary income at your marginal rate.</span></div>
+            <span class="toggle-text-wrap">
+              <label class="toggle-label" for="allowNegativeGearing">Allow negative gearing</label>
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About negative gearing">?</button><span class="tooltip-text">Switch on to compare against legacy rules where net rental losses (interest + carrying costs + depreciation) offset salary income at your marginal rate.</span></span>
             </span>
             <label class="toggle"><input type="checkbox" id="allowNegativeGearing" oninput="calc()" aria-label="Allow negative gearing"><span class="toggle-slider"></span></label>
           </div>
           <div class="hint" id="neg-gearing-hint"></div>
         </div>
         <div class="field" style="margin-top:12px">
-          <label for="cgtMethod">ETF Portfolio CGT Method
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">FY27 rules (from 1 Jul 2027): 50% discount is replaced by CPI indexation of cost base, taxing real gains at 30% floor. Legacy: current-law 50% discount on gains held &gt;12 months. PPOR remains fully CGT-exempt.</span></div>
-          </label>
-          <select id="cgtMethod" onchange="toggleVis('legacy-cgt-fields', this.value==='legacy');calc()" aria-label="CGT Method">
+          <div class="label-row">
+            <label for="cgtMethod">ETF Portfolio CGT Method</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About CGT method">?</button><span class="tooltip-text">FY27 rules: 50% discount is replaced by CPI indexation of cost base, taxing real gains at 30% floor. Legacy: current-law 50% discount on gains held &gt;12 months. PPOR remains fully CGT-exempt.</span></span>
+          </div>
+          <select id="cgtMethod" onchange="updateConditionalUI();calc()" aria-label="CGT Method">
             <option value="fy27">FY27 rules — CPI indexation + 30% floor</option>
             <option value="legacy">Legacy — 50% discount (pre-FY27)</option>
           </select>
         </div>
         <div class="toggle-row" id="pensioner-field" style="margin-top:8px">
-          <span class="toggle-label">Pensioner / income support recipient
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Under FY27 rules, pensioners are exempt from the 30% minimum floor and taxed at ordinary marginal rates.</span></div>
+          <span class="toggle-text-wrap">
+            <label class="toggle-label" for="isPensioner">Pensioner / income support recipient</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About pensioner exemption">?</button><span class="tooltip-text">Under FY27 rules, pensioners are exempt from the 30% minimum floor and taxed at ordinary marginal rates.</span></span>
           </span>
           <label class="toggle"><input type="checkbox" id="isPensioner" oninput="calc()" aria-label="Pensioner exemption"><span class="toggle-slider"></span></label>
         </div>
         <div class="field" id="legacy-cgt-fields" style="display:none">
-          <label for="cgtDiscount">Legacy CGT Discount
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">50% discount applies to assets held over 12 months under current law.</span></div>
-          </label>
+          <div class="label-row">
+            <label for="cgtDiscount">Legacy CGT Discount</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About legacy CGT discount">?</button><span class="tooltip-text">50% discount applies to assets held over 12 months under legacy rules.</span></span>
+          </div>
           <select id="cgtDiscount" onchange="calc()" aria-label="CGT Discount">
             <option value="0.5">50% discount (asset held &gt;12mo)</option>
             <option value="0">No discount</option>
           </select>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label">Property is main residence (CGT-exempt)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Your primary home is exempt from Capital Gains Tax when sold. Turn off only if modelling an investment property.</span></div>
+          <span class="toggle-text-wrap">
+            <label class="toggle-label" for="mainResidence">Property is main residence (CGT-exempt)</label>
+            <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About main residence CGT exemption">?</button><span class="tooltip-text">Your primary home is exempt from Capital Gains Tax when sold. Turn off when modelling a taxable investment property.</span></span>
           </span>
           <label class="toggle"><input type="checkbox" id="mainResidence" checked oninput="calc()" aria-label="Main residence CGT exemption"><span class="toggle-slider"></span></label>
         </div>
         <div class="field">
-          <label for="inflation">General Inflation (% p.a.)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Used for cost inflation and as the NPV discount rate to convert future wealth back to today's dollars.</span></div>
-            <span class="val" id="lbl-inflation">3.0%</span>
-          </label>
+          <div class="label-row">
+            <label for="inflation">General Inflation (% p.a.)</label>
+            <span class="label-right">
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About general inflation">?</button><span class="tooltip-text">Used for cost inflation and as the NPV discount rate to convert future wealth back to today's dollars.</span></span>
+              <span class="val" id="lbl-inflation">3.0%</span>
+            </span>
+          </div>
           <div class="range-num-row">
             <input type="range" id="inflation" min="0" max="8" step="0.25" value="3.0" aria-label="Inflation rate percent"
               oninput="syncDualInput('inflation', 'inflationNum', 'lbl-inflation', '', '%');calc()">
@@ -505,10 +541,13 @@
           </div>
         </div>
         <div class="field">
-          <label for="retVol">Return Volatility (std dev % p.a.)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Drives 400 Monte Carlo simulations and plots the 10–90% confidence cone. Set to 0 to disable.</span></div>
-            <span class="val" id="lbl-vol">10%</span>
-          </label>
+          <div class="label-row">
+            <label for="retVol">Return Volatility (std dev % p.a.)</label>
+            <span class="label-right">
+              <span class="tooltip-wrap"><button type="button" class="tooltip-icon" aria-label="About return volatility">?</button><span class="tooltip-text">Drives 400 correlated Monte Carlo simulations and plots the 10–90% confidence cone. Set to 0 to disable.</span></span>
+              <span class="val" id="lbl-vol">10%</span>
+            </span>
+          </div>
           <div class="range-num-row">
             <input type="range" id="retVol" min="0" max="25" step="1" value="10" aria-label="Return volatility percent"
               oninput="syncDualInput('retVol', 'retVolNum', 'lbl-vol', '', '%');calc()">
@@ -533,7 +572,6 @@
       <div class="milestone-card buy" id="card-buy">
         <div class="mc-label">🏠 Buying: Net Position</div>
         <div class="mc-age" id="buy-age">—</div>
-        <div class="mc-years" id="buy-years"></div>
         <div class="mc-number" id="buy-number"></div>
         <div class="mc-desc" id="buy-desc"></div>
         <div class="progress-bar"><div class="progress-fill buy-fill" id="buy-bar"></div></div>
@@ -542,16 +580,14 @@
       <div class="milestone-card rent" id="card-rent">
         <div class="mc-label">🔑 Renting: Net Position</div>
         <div class="mc-age" id="rent-age">—</div>
-        <div class="mc-years" id="rent-years"></div>
         <div class="mc-number" id="rent-number"></div>
         <div class="mc-desc" id="rent-desc"></div>
         <div class="progress-bar"><div class="progress-fill rent-fill" id="rent-bar"></div></div>
         <div class="progress-pct" id="rent-pct"></div>
       </div>
       <div class="milestone-card breakeven" id="card-breakeven">
-        <div class="mc-label">🟢 Break-even Point</div>
+        <div class="mc-label">⚖️ Break-even Point</div>
         <div class="mc-age" id="breakeven-age">—</div>
-        <div class="mc-years" id="breakeven-years"></div>
         <div class="mc-number" id="breakeven-number"></div>
         <div class="mc-desc" id="breakeven-desc"></div>
         <div class="progress-bar"><div class="progress-fill breakeven-fill" id="breakeven-bar"></div></div>
@@ -560,7 +596,6 @@
       <div class="milestone-card verdict" id="card-delta">
         <div class="mc-label">🟣 NPV Advantage (Today's $)</div>
         <div class="mc-age" id="delta-age">—</div>
-        <div class="mc-years" id="delta-years"></div>
         <div class="mc-number" id="delta-number"></div>
         <div class="mc-desc" id="delta-desc"></div>
         <div class="progress-bar"><div class="progress-fill verdict-fill" id="delta-bar"></div></div>
@@ -576,7 +611,7 @@
         <div class="whatif-block">
           <div>
             <div class="whatif-label">
-              🔀 Horizon Scrubber:&nbsp;<span class="whatif-age-val" id="wi-years-val">10</span>&nbsp;years
+              🔀 Horizon Scrubber:&nbsp;<span class="whatif-age-val" id="wi-years-val">10 yrs</span>
             </div>
             <input type="range" class="whatif-slider" id="wi-years"
               min="1" max="30" step="1" value="10" aria-label="What if horizon years"
@@ -590,7 +625,7 @@
     <!-- Scenario Analysis -->
     <div id="scenario-section">
       <p class="section-label">📋 Alternate Scenarios</p>
-      <p class="scenario-intro" id="scenario-intro">How sensitive is the outcome to macroeconomic and market shifts?</p>
+      <p class="scenario-intro" id="scenario-intro">How sensitive is the NPV outcome to macroeconomic and market shifts?</p>
       <div class="scenario-grid" id="scenario-grid"></div>
     </div>
 
@@ -605,19 +640,19 @@
       <div class="tax-item">
         <div class="ti-label">Owner Extra Costs</div>
         <div class="ti-value" id="ts-owner-extra">—</div>
-        <div class="ti-sub">maint. + rates + insurance + land tax</div>
+        <div class="ti-sub" id="ts-owner-extra-sub">maint. + rates + insurance</div>
       </div>
       <div class="tax-item highlight">
         <div class="ti-label">Total Cost of Owning</div>
         <div class="ti-value" id="ts-owner-total">—</div>
-        <div class="ti-sub">per year</div>
+        <div class="ti-sub" id="ts-owner-total-sub">per year</div>
       </div>
       <div class="tax-item">
         <div class="ti-label">Annual Rent</div>
         <div class="ti-value" id="ts-rent">—</div>
         <div class="ti-sub" id="ts-rent-weekly">per week</div>
       </div>
-      <div class="tax-item green">
+      <div class="tax-item" id="ts-gap-item">
         <div class="ti-label">Cash-flow Gap</div>
         <div class="ti-value" id="ts-gap">—</div>
         <div class="ti-sub" id="ts-gap-note">invested by renter</div>
@@ -634,8 +669,8 @@
     <div class="charts-grid">
 
       <div class="chart-card full-span">
-        <h4 id="projection-chart-title">Wealth Paths: Owner Equity vs Renter Portfolio</h4>
-        <div class="chart-sub">Nominal dollars from Year 0 to exit. Solid lines = deterministic paths; shaded areas = 10th–90th percentile Monte Carlo confidence cones.</div>
+        <h4 id="projection-chart-title">Wealth Paths: Net Liquidation Position (Buy vs Rent)</h4>
+        <div class="chart-sub">Nominal after-tax, after-selling-cost liquidation wealth from Year 0 to exit. Solid lines = deterministic paths; shaded bands = 10th–90th percentile Monte Carlo cones.</div>
         <div class="chart-wrap"><canvas id="chart-projection"></canvas></div>
       </div>
 
@@ -681,7 +716,7 @@
     </details>
 
     <p class="disclaimer">
-      <strong>General information only — not financial advice.</strong> This model simulates differential cash flows and wealth accumulation under Australian tax and lending settings. The mortgage interest rate is held constant across the horizon (rate resets and refinancing are not modeled). Dividend/distribution tax incorporates Australian company tax franking credits (with refundable tax offsets for investors in lower marginal brackets). Capital gains tax on portfolios applies CPI indexation under FY27 rules or the 50% discount under legacy rules. The buyer's principal place of residence (PPOR) is treated as fully CGT exempt. Stamp duty bands and First Home Buyer concessions reflect current state revenue office schedules (updated 2025/2026). Consider seeking advice from a licensed financial adviser before making property or investment decisions.
+      <strong>General information only — not financial advice.</strong> This model simulates differential cash flows and wealth accumulation under Australian tax and lending settings. The mortgage interest rate is held constant across the horizon (rate resets and refinancing are not modeled). Dividend/distribution tax incorporates Australian company tax franking credits (with refundable tax offsets for investors in lower marginal brackets). Capital gains tax on portfolios applies CPI indexation under FY27 rules or the 50% discount under legacy rules with progressive bracket stacking. The buyer's principal place of residence (PPOR) is treated as fully CGT exempt unless toggled off. Stamp duty bands and First Home Buyer concessions reflect approximate state revenue office schedules (updated 2025/2026). Consider seeking advice from a licensed financial adviser before making property or investment decisions.
     </p>
 
   </main>

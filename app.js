@@ -6,10 +6,11 @@
 //  - Standard P&I (or interest-only) mortgage amortisation
 //  - Real 100% offset account vs ETF surplus investing
 //  - Owner carrying costs: maintenance, rates/strata, insurance, land tax
-//  - Renter invests deposit + upfront costs and cash-flow differential
+//  - Renter invests savings (less nominal bond) and cash-flow gap
 //  - Australian dividend gross-up and refundable franking credits
 //  - Capital Gains Tax: FY27 CPI-indexation method or Legacy 50% discount
-//  - Monte Carlo volatility simulation (400 runs) with 10–90% percentile cone
+//    with progressive bracket stacking and optional investment property CGT
+//  - Monte Carlo volatility simulation (400 runs, correlated shocks)
 // ══════════════════════════════════════════════════════════
 
 const AGENT_RATE_DEFAULT = 0.02;
@@ -36,6 +37,12 @@ function incomeTax(income) {
   return 0;
 }
 
+// Combined income tax + 2% Medicare Levy above tax-free threshold.
+function totalIncomeTax(income) {
+  if (income <= 0) return 0;
+  return incomeTax(income) + Math.max(0, income - 18200) * MEDICARE_LEVY_RATE;
+}
+
 // Effective marginal tax rate (income tax bracket rate + 2% Medicare Levy).
 function marginalTaxRate(income) {
   if (income <= 18200) return 0;
@@ -45,7 +52,41 @@ function marginalTaxRate(income) {
   return TAX_BRACKETS_2526[TAX_BRACKETS_2526.length - 1].rate + MEDICARE_LEVY_RATE;
 }
 
-// General transfer duty schedules by state/territory for owner-occupiers.
+// Incremental tax on realised capital gains stacked onto base taxable income.
+function computeIncrementalTax(baseSalary, extraTaxableGain, taxRateMethod, flatRate, minFloorRate = 0) {
+  if (extraTaxableGain <= 0) return 0;
+  if (taxRateMethod === 'income') {
+    const base = Math.max(0, baseSalary || 0);
+    const incTax = totalIncomeTax(base + extraTaxableGain) - totalIncomeTax(base);
+    return Math.max(incTax, extraTaxableGain * minFloorRate);
+  }
+  return extraTaxableGain * Math.max(flatRate || 0, minFloorRate);
+}
+
+// General transfer duty schedules by state/territory.
+const VIC_GENERAL_DUTY = price => price <= 25000 ? price * 0.014
+  : price <= 130000 ? 350 + (price - 25000) * 0.024
+  : price <= 960000 ? 2870 + (price - 130000) * 0.06
+  : price <= 2000000 ? price * 0.055
+  : 110000 + (price - 2000000) * 0.065;
+
+const VIC_PPR_DUTY = price => price <= 25000 ? price * 0.014
+  : price <= 130000 ? 350 + (price - 25000) * 0.024
+  : price <= 440000 ? 2870 + (price - 130000) * 0.05
+  : price <= 550000 ? 18370 + (price - 440000) * 0.06
+  : VIC_GENERAL_DUTY(price);
+
+const QLD_GENERAL_DUTY = price => price <= 5000 ? 0
+  : price <= 75000 ? (price - 5000) * 0.015
+  : price <= 540000 ? 1050 + (price - 75000) * 0.035
+  : price <= 1000000 ? 17325 + (price - 540000) * 0.045
+  : 38025 + (price - 1000000) * 0.0575;
+
+const QLD_HOME_DUTY = price => price <= 350000 ? price * 0.01
+  : price <= 540000 ? 3500 + (price - 350000) * 0.035
+  : price <= 1000000 ? 10150 + (price - 540000) * 0.045
+  : 30850 + (price - 1000000) * 0.0575;
+
 const STAMP_DUTY_BANDS = {
   NSW: price => price <= 17000 ? price * 0.0125
     : price <= 36000 ? 212 + (price - 17000) * 0.015
@@ -53,16 +94,8 @@ const STAMP_DUTY_BANDS = {
     : price <= 364000 ? 1564 + (price - 97000) * 0.035
     : price <= 1212000 ? 10909 + (price - 364000) * 0.045
     : 49069 + (price - 1212000) * 0.055,
-  VIC: price => price <= 25000 ? price * 0.014
-    : price <= 130000 ? 350 + (price - 25000) * 0.024
-    : price <= 960000 ? 2870 + (price - 130000) * 0.06
-    : price <= 2000000 ? 52670 + (price - 960000) * 0.065
-    : 120270 + (price - 2000000) * 0.065, // Continuous marginal calculation over $2M
-  QLD: price => price <= 5000 ? 0
-    : price <= 75000 ? (price - 5000) * 0.015
-    : price <= 540000 ? 1050 + (price - 75000) * 0.035
-    : price <= 1000000 ? 17325 + (price - 540000) * 0.045
-    : 38025 + (price - 1000000) * 0.0575,
+  VIC: (price, isInvestmentProperty) => isInvestmentProperty ? VIC_GENERAL_DUTY(price) : VIC_PPR_DUTY(price),
+  QLD: (price, isInvestmentProperty) => isInvestmentProperty ? QLD_GENERAL_DUTY(price) : QLD_HOME_DUTY(price),
   WA: price => price <= 120000 ? price * 0.019
     : price <= 150000 ? 2280 + (price - 120000) * 0.0285
     : price <= 360000 ? 3135 + (price - 150000) * 0.038
@@ -91,32 +124,37 @@ const STAMP_DUTY_BANDS = {
     : price <= 1000000 ? 21600 + (price - 750000) * 0.059
     : price <= 1455000 ? 36350 + (price - 1000000) * 0.064
     : price * 0.0454,
-  NT: price => price <= 525000 ? price * (0.06571441 - 15294.68 / Math.max(1, price))
-    : price <= 3000000 ? price * 0.0495
-    : price * 0.0575,
+  NT: price => {
+    if (price <= 525000) {
+      const v = price / 1000;
+      return (0.06571441 * v * v) + (15 * v);
+    }
+    return price <= 3000000 ? price * 0.0495 : price * 0.0575;
+  },
 };
 
-// First-home-buyer [full_exemption_cap, taper_upper_limit]
+// First-home-buyer [full_exemption_cap, taper_upper_limit] for established PPOR
 const FHB_THRESHOLDS = {
   NSW: [800000, 1000000],
   VIC: [600000, 750000],
-  QLD: [700000, 800000],  // Updated: QLD raised FHB threshold in 2024
-  WA:  [450000, 600000],  // Updated: WA raised FHB threshold
-  SA:  [650000, 800000],  // SA FHB exemption/concession thresholds
+  QLD: [700000, 800000],
+  WA:  [500000, 700000],  // Metro FHB concession range
+  SA:  [0, 0],            // SA FHB exemption applies to new builds only
   TAS: [600000, 750000],
   ACT: [1000000, 1455000],
   NT:  [0, 0],
 };
 
-function estimateStampDuty(price, firstHomeBuyer, state) {
+function estimateStampDuty(price, firstHomeBuyer, state, isInvestmentProperty = false) {
+  const p = Math.max(0, price || 0);
   const bandFn = STAMP_DUTY_BANDS[state] || STAMP_DUTY_BANDS.NSW;
-  let duty = bandFn(Math.max(0, price));
+  let duty = bandFn(p, !!isInvestmentProperty);
 
-  if (firstHomeBuyer) {
+  if (firstHomeBuyer && !isInvestmentProperty) {
     const [full, taper] = FHB_THRESHOLDS[state] || FHB_THRESHOLDS.NSW;
     if (full > 0) {
-      if (price <= full) duty = 0;
-      else if (price < taper) duty *= (price - full) / (taper - full);
+      if (p <= full) duty = 0;
+      else if (p < taper) duty *= (p - full) / (taper - full);
     }
   }
 
@@ -133,6 +171,46 @@ function estimateLMI(loanAmount, propertyPrice) {
   else if (lvr <= 95) rate = 0.025;
   else rate = 0.035;
   return Math.round(loanAmount * rate / 100) * 100;
+}
+
+// Shared Day-1 capital allocation, deposit clamping, loan sizing, and bond parity.
+function computeUpfrontAndLoan(inp) {
+  const totalSavings = Math.max(0, inp.totalSavings || 0);
+  const propertyPrice = Math.max(0, inp.propertyPrice || 0);
+  const deposit = Math.max(0, inp.deposit || 0);
+  const stampDuty = Math.max(0, inp.stampDuty || 0);
+  const legalFeesBuy = Math.max(0, inp.legalFeesBuy || 0);
+  const lmiAmount = Math.max(0, inp.lmiAmount || 0);
+  const fhogAmount = Math.max(0, inp.fhogAmount || 0);
+
+  const buyerUpfrontCash = Math.max(0, (inp.financeStampDuty ? 0 : stampDuty) + legalFeesBuy
+    + (inp.financeLMI ? 0 : lmiAmount) - fhogAmount);
+  const maxDeposit = Math.max(0, totalSavings - buyerUpfrontCash);
+  const actualDeposit = Math.min(deposit, maxDeposit);
+  const buyerSurplus = Math.max(0, totalSavings - actualDeposit - buyerUpfrontCash);
+  const loanAmount = Math.max(0, propertyPrice - actualDeposit
+    + (inp.financeStampDuty ? stampDuty : 0)
+    + (inp.financeLMI ? lmiAmount : 0));
+  const lvr = propertyPrice > 0 ? (loanAmount / propertyPrice * 100) : 0;
+
+  // In PPOR mode, rental bond ties up cash at 0% return and refunds nominally at exit.
+  // In Investment Property mode, both paths rent elsewhere so bond cancels out.
+  const rawBond = !inp.isInvestmentProperty
+    ? Math.max(0, (inp.weeklyRent || 0) * (inp.bondWeeks || 0))
+    : 0;
+  const bond = Math.min(totalSavings, rawBond);
+  const renterInitial = Math.max(0, totalSavings - bond);
+
+  return {
+    buyerUpfrontCash,
+    maxDeposit,
+    actualDeposit,
+    buyerSurplus,
+    loanAmount,
+    lvr,
+    bond,
+    renterInitial,
+  };
 }
 
 // Scheduled annual P&I (or IO) mortgage repayment
@@ -172,30 +250,87 @@ function amortizeYear(balance, annualRate, annualPayment, interestOnly, offsetBa
   };
 }
 
-// Grows an ETF portfolio balance by 1 year:
-// Australian Franking Credit Math: Grossed up for 30% company tax, with refundable
-// tax offsets if marginal tax rate is below 30%.
-function growEtfYear(balance, year, opts) {
-  const { dividendYield, frankedFraction, taxRate, companyTaxRate, priceGrowthRate, lots } = opts;
-  const div = Math.max(0, balance) * dividendYield;
+function calcDividendTax(div, frankedFraction, taxRate, companyTaxRate) {
+  if (div <= 0) return 0;
   const frankedDiv = div * frankedFraction;
   const unfrankedDiv = div - frankedDiv;
-
   const grossedFrankedDiv = frankedDiv > 0 ? (frankedDiv / (1 - companyTaxRate)) : 0;
   const frankingCredit = grossedFrankedDiv * companyTaxRate;
   const taxOnGrossed = grossedFrankedDiv * taxRate;
-  const netFrankedTax = taxOnGrossed - frankingCredit; // Can be negative (refund) if taxRate < 0.30
+  const netFrankedTax = taxOnGrossed - frankingCredit; // Refundable if taxRate < 0.30
   const unfrankedTax = unfrankedDiv * taxRate;
-  const divTax = netFrankedTax + unfrankedTax;
-  const netDiv = div - divTax;
+  return netFrankedTax + unfrankedTax;
+}
 
-  let newBalance = balance + netDiv;
-  let basisDelta = Math.max(0, netDiv);
-  if (netDiv > 0 && lots) lots.push({ year, amount: netDiv });
+// Grows an ETF portfolio balance by 1 year with mid-year contribution timing
+// and avoids compounding full-year capital growth onto same-year distributions.
+function growEtfYear(startBalance, contribution, year, opts) {
+  const { dividendYield, frankedFraction, taxRate, companyTaxRate, priceGrowthRate, lots } = opts;
+  const start = Math.max(0, startBalance);
+  const contrib = Math.max(0, contribution || 0);
 
-  newBalance *= (1 + priceGrowthRate);
-  newBalance = Math.max(0, newBalance);
+  const divStart = start * dividendYield;
+  const divTaxStart = calcDividendTax(divStart, frankedFraction, taxRate, companyTaxRate);
+  const netDivStart = divStart - divTaxStart;
+  const grownStart = start * (1 + priceGrowthRate) + netDivStart;
+
+  const divContrib = 0.5 * contrib * dividendYield;
+  const divTaxContrib = calcDividendTax(divContrib, frankedFraction, taxRate, companyTaxRate);
+  const netDivContrib = divContrib - divTaxContrib;
+  const grownContrib = contrib * (1 + 0.5 * priceGrowthRate) + netDivContrib;
+
+  const newBalance = Math.max(0, grownStart + grownContrib);
+  const netDivTotal = netDivStart + netDivContrib;
+  const divTax = divTaxStart + divTaxContrib;
+  const basisDelta = contrib + Math.max(0, netDivTotal);
+
+  if (lots) {
+    if (contrib > 0) lots.push({ year, amount: contrib });
+    if (netDivTotal > 0) lots.push({ year, amount: netDivTotal });
+  }
+
   return { balance: newBalance, basisDelta, divTax };
+}
+
+function computePortfolioCgt(balance, sellFee, basis, lots, atYear, baseSalary, inp) {
+  if (balance <= 0) return { cgt: 0, taxableGain: 0 };
+  const netProceeds = Math.max(0, balance - sellFee);
+  const minFloor = inp.isPensioner ? 0 : 0.30;
+
+  if (inp.cgtMethod === 'fy27') {
+    const indexedBasis = lots.reduce((sum, lot) => sum + lot.amount * Math.pow(1 + inp.inflation, atYear - lot.year), 0);
+    const taxableGain = Math.max(0, netProceeds - indexedBasis);
+    const cgt = computeIncrementalTax(baseSalary, taxableGain, inp.taxRateMethod, inp.taxRate, minFloor);
+    return { cgt, taxableGain };
+  }
+
+  const nominalGain = Math.max(0, netProceeds - basis);
+  if (nominalGain <= 0) return { cgt: 0, taxableGain: 0 };
+  if (atYear <= 1) {
+    const cgt = computeIncrementalTax(baseSalary, nominalGain, inp.taxRateMethod, inp.taxRate, 0);
+    return { cgt, taxableGain: nominalGain };
+  }
+  const longTermBasis = lots.reduce((sum, lot) => (lot.year < atYear ? sum + lot.amount : sum), 0);
+  const longTermFrac = basis > 0 ? Math.min(1, Math.max(0, longTermBasis / basis)) : 1;
+  const taxableGain = (1 - inp.cgtDiscount * longTermFrac) * nominalGain;
+  const cgt = computeIncrementalTax(baseSalary, taxableGain, inp.taxRateMethod, inp.taxRate, 0);
+  return { cgt, taxableGain };
+}
+
+function computePropertyCgt(propertyValue, sellingCosts, propCostBase, atYear, baseSalary, inp) {
+  if (inp.mainResidence) return { cgt: 0, taxableGain: 0 };
+  const netProceeds = Math.max(0, propertyValue - sellingCosts);
+  if (inp.cgtMethod === 'fy27') {
+    const indexedCostBase = propCostBase * Math.pow(1 + inp.inflation, atYear);
+    const taxableGain = Math.max(0, netProceeds - indexedCostBase);
+    const minFloor = inp.isPensioner ? 0 : 0.30;
+    const cgt = computeIncrementalTax(baseSalary, taxableGain, inp.taxRateMethod, inp.taxRate, minFloor);
+    return { cgt, taxableGain };
+  }
+  const nominalGain = Math.max(0, netProceeds - propCostBase);
+  const taxableGain = (atYear > 1 ? (1 - inp.cgtDiscount) : 1) * nominalGain;
+  const cgt = computeIncrementalTax(baseSalary, taxableGain, inp.taxRateMethod, inp.taxRate, 0);
+  return { cgt, taxableGain };
 }
 
 // ══════════════════════════════════════════════════════════
@@ -204,47 +339,41 @@ function growEtfYear(balance, year, opts) {
 
 function project(inp, opts = {}) {
   const {
-    years, propertyPrice, deposit, totalSavings, surplusDestination = 'offset',
-    propertyGrowth, stampDuty, financeStampDuty,
+    years, propertyPrice, surplusDestination = 'offset',
+    propertyGrowth, stampDuty,
     legalFeesBuy, legalFeesSell, agentFeeRate,
-    lmiAmount = 0, financeLMI = true, fhogAmount = 0,
     mortgageRate, loanTerm, interestOnly,
     maintenanceRate, councilRates, bodyCorp = 0, bodyCorpGrowth = 0, ownerInsurance,
-    weeklyRent, rentGrowth, renterInsurance, bondWeeks,
+    weeklyRent, rentGrowth, renterInsurance,
     investReturn, dividendYield, frankingLevel, taxRate, etfSellFeeRate = 0,
     taxRateMethod = 'income', grossSalary = 0, salaryGrowth = true,
-    isInvestmentProperty, rentalIncome, allowNegativeGearing,
+    isInvestmentProperty = false, rentalIncome = 0, allowNegativeGearing = false,
     vacancyWeeks = 0, propertyManagementRate = 0, landTax = 0, depreciationDeduction = 0,
-    cgtDiscount, mainResidence, inflation,
-    cgtMethod = 'fy27', isPensioner = false,
+    inflation,
   } = inp;
 
   const light = !!opts.light;
+  const mcTrack = !!opts.mcTrack;
   const vol   = opts.vol || 0;
-  const shock = opts.shock || null;
+  const shockEq = opts.shockEq || opts.shock || null;
+  const shockProp = opts.shockProp || opts.shock || null;
 
   const companyTaxRate = 0.30;
   const frankedFraction = frankingLevel;
 
-  // Buyer upfront cash beyond deposit
-  const buyerUpfrontCash = Math.max(0, (financeStampDuty ? 0 : stampDuty) + legalFeesBuy
-    + (financeLMI ? 0 : lmiAmount) - fhogAmount);
+  const upfront = computeUpfrontAndLoan(inp);
+  const {
+    buyerUpfrontCash, actualDeposit, buyerSurplus,
+    loanAmount, bond, renterInitial,
+  } = upfront;
 
-  // Exact Day-1 parity: Deposit + upfront costs are capped to total savings
-  const maxDeposit = Math.max(0, totalSavings - buyerUpfrontCash);
-  const actualDeposit = Math.min(deposit, maxDeposit);
-  const buyerSurplus = Math.max(0, totalSavings - actualDeposit - buyerUpfrontCash);
-
-  const loanAmount = Math.max(0, propertyPrice - actualDeposit + (financeStampDuty ? stampDuty : 0) + (financeLMI ? lmiAmount : 0));
   const annualRepayment = annualMortgageRepayment(loanAmount, mortgageRate, loanTerm, interestOnly);
+  const propCostBase = propertyPrice + stampDuty + legalFeesBuy;
 
   let offsetBalance = surplusDestination === 'offset' ? buyerSurplus : 0;
   let buyerEtf = surplusDestination === 'etf' ? buyerSurplus : 0;
   let buyerEtfBasis = buyerEtf;
   const buyerEtfLots = buyerEtf > 0 ? [{ year: 0, amount: buyerEtf }] : [];
-
-  // Renter invests 100% of Total Savings from Day 0
-  const renterInitial = Math.max(0, totalSavings);
 
   let propertyValue = propertyPrice;
   let mortgageBalance = loanAmount;
@@ -252,18 +381,34 @@ function project(inp, opts = {}) {
   let portfolioBasis = renterInitial;
   const basisLots = renterInitial > 0 ? [{ year: 0, amount: renterInitial }] : [];
 
+  const year0BuyNet = propertyPrice - loanAmount + buyerSurplus;
+  const year0RentNet = renterInitial + bond;
+
   const rows = [];
-  let breakevenYear = null;
+  const buyNetSeries = mcTrack ? [year0BuyNet] : null;
+  const rentNetSeries = mcTrack ? [year0RentNet] : null;
+
   let finalTaxRate = taxRate;
+  let finalSalary = grossSalary;
+  let finalBuyNet = year0BuyNet;
+  let finalRentNet = year0RentNet;
+  let finalSellingCosts = 0;
+  let finalPropertyCgt = 0;
+  let finalBuyerEtfCgt = 0;
+  let finalBuyerEtfNet = 0;
+  let finalRentCgt = 0;
+  let finalEtfSellFee = 0;
 
   for (let year = 1; year <= years; year++) {
-    const z = shock ? shock(year - 1) : 0;
-    const propGrowthY = propertyGrowth + vol * z * 0.5;
-    const investReturnY = investReturn + vol * z;
+    const zEq = shockEq ? shockEq(year - 1) : 0;
+    const zProp = shockProp ? shockProp(year - 1) : 0;
+    const propGrowthY = Math.max(propertyGrowth + vol * zProp * 0.5, -0.50);
+    const investReturnY = Math.max(investReturn + vol * zEq, -0.90);
 
     const salaryY = salaryGrowth ? grossSalary * Math.pow(1 + inflation, year - 1) : grossSalary;
     const taxRateY = taxRateMethod === 'income' ? marginalTaxRate(salaryY) : taxRate;
     finalTaxRate = taxRateY;
+    finalSalary = salaryY;
 
     propertyValue *= (1 + propGrowthY);
 
@@ -277,13 +422,12 @@ function project(inp, opts = {}) {
       amortizeYear(mortgageBalance, mortgageRate, annualRepayment, interestOnly, offsetBalance);
     mortgageBalance = newBalance;
 
-    // Offset balance overflow to buyer ETF if loan is fully covered/paid
+    // Offset balance overflow to buyer ETF if loan is paid below offset
+    let buyerEtfContrib = 0;
     if (offsetBalance > mortgageBalance) {
       const excess = offsetBalance - mortgageBalance;
       offsetBalance = mortgageBalance;
-      buyerEtf += excess;
-      buyerEtfBasis += excess;
-      buyerEtfLots.push({ year, amount: excess });
+      buyerEtfContrib += excess;
     }
 
     const annualRent = (weeklyRent * 52) * Math.pow(1 + rentGrowth, year - 1);
@@ -294,115 +438,154 @@ function project(inp, opts = {}) {
     if (isInvestmentProperty) {
       const grossRentalIncome = (rentalIncome * 52) * Math.pow(1 + rentGrowth, year - 1);
       const occupancyFactor = Math.max(0, 1 - vacancyWeeks / 52);
-      const managementFee = grossRentalIncome * occupancyFactor * (propertyManagementRate / 100);
+      const managementFee = grossRentalIncome * occupancyFactor * propertyManagementRate;
       annualRentalIncome = grossRentalIncome * occupancyFactor - managementFee;
 
-      const depreciationY = depreciationDeduction * Math.pow(1 + inflation, year - 1);
-      const cashLoss = mortgagePaid + maint + rates + ownerIns + landTaxY - annualRentalIncome;
-      const taxableLoss = cashLoss + depreciationY;
-      if (allowNegativeGearing && taxableLoss > 0) negGearingBenefit = taxableLoss * taxRateY;
-      else if (taxableLoss < 0) {
-        negGearingBenefit = taxableLoss * taxRateY;
+      // Only loan interest (not principal) + non-capital carrying costs + flat depreciation are tax deductible.
+      const deductibleExpenses = interestPaid + maint + rates + ownerIns + landTaxY;
+      const depreciationY = depreciationDeduction;
+      const netRentalResult = annualRentalIncome - deductibleExpenses - depreciationY;
+      if (netRentalResult < 0) {
+        negGearingBenefit = allowNegativeGearing ? (-netRentalResult) * taxRateY : 0;
+      } else if (netRentalResult > 0) {
+        negGearingBenefit = -netRentalResult * taxRateY; // Tax payable on net rental profit
       }
     }
 
-    // Actual owner carry based on real cash paid (no phantom payments after payoff)
     const ownerCarry = mortgagePaid + maint + rates + ownerIns + landTaxY - annualRentalIncome - negGearingBenefit;
     const renterCarry = annualRent + renterIns;
-    const gap = ownerCarry - renterCarry;
+    // In investment-property mode, both scenarios rent elsewhere so renterCarry cancels out.
+    const gap = isInvestmentProperty ? ownerCarry : (ownerCarry - renterCarry);
 
-    // Differential Cash-Flow Allocation (Symmetric):
+    let renterContrib = 0;
     if (gap < 0) {
-      // Owning is cheaper: Buyer saves surplus
       let surplusY = -gap;
-      const offsetRoom = Math.max(0, mortgageBalance - offsetBalance);
-      const toOffset = Math.min(surplusY, offsetRoom);
-      offsetBalance += toOffset;
-      surplusY -= toOffset;
+      if (surplusDestination === 'offset') {
+        const offsetRoom = Math.max(0, mortgageBalance - offsetBalance);
+        const toOffset = Math.min(surplusY, offsetRoom);
+        offsetBalance += toOffset;
+        surplusY -= toOffset;
+      }
       if (surplusY > 0) {
-        buyerEtf += surplusY;
-        buyerEtfBasis += surplusY;
-        buyerEtfLots.push({ year, amount: surplusY });
+        buyerEtfContrib += surplusY;
       }
     } else if (gap > 0) {
-      // Renting is cheaper: Renter saves surplus
-      portfolio += gap;
-      portfolioBasis += gap;
-      basisLots.push({ year, amount: gap });
+      renterContrib = gap;
     }
 
     // Compound ETF portfolios
     const priceGrowthRate = Math.max(investReturnY - dividendYield, -0.99);
     const etfOpts = { dividendYield, frankedFraction, taxRate: taxRateY, companyTaxRate, priceGrowthRate };
 
-    const rGrown = growEtfYear(portfolio, year, { ...etfOpts, lots: basisLots });
+    const rGrown = growEtfYear(portfolio, renterContrib, year, { ...etfOpts, lots: basisLots });
     portfolio = rGrown.balance;
     portfolioBasis += rGrown.basisDelta;
     const divTax = rGrown.divTax;
 
-    if (buyerEtf > 0) {
-      const bGrown = growEtfYear(buyerEtf, year, { ...etfOpts, lots: buyerEtfLots });
+    if (buyerEtf > 0 || buyerEtfContrib > 0) {
+      const bGrown = growEtfYear(buyerEtf, buyerEtfContrib, year, { ...etfOpts, lots: buyerEtfLots });
       buyerEtf = bGrown.balance;
       buyerEtfBasis += bGrown.basisDelta;
     }
 
     const equity = propertyValue - mortgageBalance + offsetBalance + buyerEtf;
 
-    if (!light) {
-      rows.push({
-        year, propertyValue, mortgageBalance, equity,
-        annualRepayment: mortgagePaid, maint, rates, ownerIns, landTax: landTaxY, ownerCarry,
-        annualRent, renterIns, renterCarry, gap,
-        interestPaid, principalPaid,
-        portfolio, divTax,
-        annualRentalIncome, negGearingBenefit,
-        offsetBalance, buyerEtf,
-      });
+    if (!light || mcTrack || year === years) {
+      const sellingCostsY = agentFeeRate * propertyValue + legalFeesSell;
+      const propCgtRes = computePropertyCgt(propertyValue, sellingCostsY, propCostBase, year, salaryY, inp);
+      const buyerEtfSellFeeY = buyerEtf * etfSellFeeRate;
+      const buyerEtfCgtRes = computePortfolioCgt(
+        buyerEtf, buyerEtfSellFeeY, buyerEtfBasis, buyerEtfLots, year,
+        salaryY + propCgtRes.taxableGain, inp
+      );
+      const buyerEtfNetY = buyerEtf - buyerEtfCgtRes.cgt - buyerEtfSellFeeY;
+      const buyNetY = propertyValue - mortgageBalance - sellingCostsY - propCgtRes.cgt + offsetBalance + buyerEtfNetY;
 
-      if (breakevenYear == null && equity >= portfolio) breakevenYear = year;
+      const rentEtfSellFeeY = portfolio * etfSellFeeRate;
+      const rentEtfCgtRes = computePortfolioCgt(portfolio, rentEtfSellFeeY, portfolioBasis, basisLots, year, salaryY, inp);
+      const rentNetY = portfolio - rentEtfCgtRes.cgt - rentEtfSellFeeY + bond;
+
+      if (mcTrack) {
+        buyNetSeries.push(buyNetY);
+        rentNetSeries.push(rentNetY);
+      }
+
+      if (!light && !mcTrack) {
+        rows.push({
+          year, propertyValue, mortgageBalance, equity,
+          annualRepayment: mortgagePaid, maint, rates, ownerIns, landTax: landTaxY, ownerCarry,
+          annualRent, renterIns, renterCarry, gap,
+          interestPaid, principalPaid,
+          portfolio, divTax,
+          annualRentalIncome, negGearingBenefit,
+          offsetBalance, buyerEtf,
+          buyNet: buyNetY, rentNet: rentNetY,
+          propertyCgt: propCgtRes.cgt, etfCgt: rentEtfCgtRes.cgt,
+        });
+      }
+
+      if (year === years) {
+        finalBuyNet = buyNetY;
+        finalRentNet = rentNetY;
+        finalSellingCosts = sellingCostsY;
+        finalPropertyCgt = propCgtRes.cgt;
+        finalBuyerEtfCgt = buyerEtfCgtRes.cgt;
+        finalBuyerEtfNet = buyerEtfNetY;
+        finalRentCgt = rentEtfCgtRes.cgt;
+        finalEtfSellFee = rentEtfSellFeeY;
+      }
     }
   }
 
-  // CGT Calculator
-  const computeCgt = (balance, basis, lots) => {
-    if (cgtMethod === 'fy27') {
-      const indexedBasis = lots.reduce((sum, lot) => sum + lot.amount * Math.pow(1 + inflation, years - lot.year), 0);
-      const taxableGain = Math.max(0, balance - indexedBasis);
-      const effRate = isPensioner ? finalTaxRate : Math.max(finalTaxRate, 0.30);
-      return effRate * taxableGain;
+  const npvBuy = discountToday(finalBuyNet, inp.npvDiscountRate, years);
+  const npvRent = discountToday(finalRentNet, inp.npvDiscountRate, years);
+
+  if (light) {
+    return {
+      finalPropertyValue: propertyValue,
+      buyNet: finalBuyNet,
+      rentNet: finalRentNet,
+      npvBuy,
+      npvRent,
+    };
+  }
+
+  if (mcTrack) {
+    return {
+      buyNet: finalBuyNet,
+      rentNet: finalRentNet,
+      buyNetSeries,
+      rentNetSeries,
+    };
+  }
+
+  // Sustained break-even: earliest year from which Buy stays ahead on net liquidation wealth through exit.
+  let breakevenYear = null;
+  if (rows.length > 0 && rows[rows.length - 1].buyNet >= rows[rows.length - 1].rentNet) {
+    let idx = rows.length - 1;
+    while (idx > 0 && rows[idx - 1].buyNet >= rows[idx - 1].rentNet) {
+      idx--;
     }
-    const taxableGain = (1 - cgtDiscount) * Math.max(0, balance - basis);
-    return finalTaxRate * taxableGain;
-  };
+    breakevenYear = rows[idx].year;
+  }
 
-  // Exit liquidations
-  const sellingCosts = agentFeeRate * propertyValue + legalFeesSell;
-  const bond = (weeklyRent * bondWeeks) * Math.pow(1 + rentGrowth, years - 1);
-
-  const buyerEtfSellFee = buyerEtf * etfSellFeeRate;
-  const buyerEtfCgt = buyerEtf > 0 ? computeCgt(buyerEtf, buyerEtfBasis, buyerEtfLots) : 0;
-  const buyerEtfNet = buyerEtf - buyerEtfCgt - buyerEtfSellFee;
-  const buyNet = propertyValue - mortgageBalance - sellingCosts + offsetBalance + buyerEtfNet;
-
-  const etfSellFee = portfolio * etfSellFeeRate;
   const grossGain = portfolio - portfolioBasis;
-  const cgt = computeCgt(portfolio, portfolioBasis, basisLots);
-  const rentNet = portfolio - cgt - etfSellFee + bond;
-
-  if (light) return { finalPropertyValue: propertyValue, buyNet, rentNet };
 
   return {
     rows, breakevenYear,
     loanAmount, annualRepayment, renterInitial, actualDeposit, buyerUpfrontCash, buyerSurplus,
+    year0BuyNet, year0RentNet,
     finalPropertyValue: propertyValue, finalMortgageBalance: mortgageBalance,
-    finalOffsetBalance: offsetBalance, finalBuyerEtf: buyerEtf, buyerEtfCgt, buyerEtfNet,
-    sellingCosts, bond, buyNet,
-    finalPortfolio: portfolio, portfolioBasis, grossGain, cgt, etfSellFee, rentNet,
-    delta: rentNet - buyNet,
-    finalTaxRate,
+    finalOffsetBalance: offsetBalance, finalBuyerEtf: buyerEtf,
+    buyerEtfCgt: finalBuyerEtfCgt, buyerEtfNet: finalBuyerEtfNet,
+    propertyCgt: finalPropertyCgt,
+    sellingCosts: finalSellingCosts, bond, buyNet: finalBuyNet,
+    finalPortfolio: portfolio, portfolioBasis, grossGain,
+    cgt: finalRentCgt, etfSellFee: finalEtfSellFee, rentNet: finalRentNet,
+    delta: finalRentNet - finalBuyNet,
+    finalTaxRate, finalSalary,
     npvDiscountRate: inp.npvDiscountRate,
-    npvBuy: discountToday(buyNet, inp.npvDiscountRate, years),
-    npvRent: discountToday(rentNet, inp.npvDiscountRate, years),
+    npvBuy, npvRent,
   };
 }
 
@@ -428,27 +611,38 @@ function runMonteCarlo(inp, nSims = 400) {
   if (!inp.retVol || inp.retVol <= 0) return null;
   const rand = mulberry32(20260703);
   const years = inp.years;
+  const rho = 0.25;
+  const rhoComp = Math.sqrt(1 - rho * rho);
   let buyWins = 0;
 
-  const equityYearly = Array.from({ length: years + 1 }, () => []);
-  const portfolioYearly = Array.from({ length: years + 1 }, () => []);
+  const buyYearly = Array.from({ length: years + 1 }, () => []);
+  const rentYearly = Array.from({ length: years + 1 }, () => []);
+
+  const randNormPair = () => {
+    const u1 = Math.max(rand(), 1e-9), u2 = rand();
+    const m = Math.sqrt(-2 * Math.log(u1));
+    return [m * Math.cos(2 * Math.PI * u2), m * Math.sin(2 * Math.PI * u2)];
+  };
 
   for (let s = 0; s < nSims; s++) {
-    const zs = new Array(years);
-    for (let i = 0; i < years; i += 2) {
-      const u1 = Math.max(rand(), 1e-9), u2 = rand();
-      const m = Math.sqrt(-2 * Math.log(u1));
-      zs[i] = m * Math.cos(2 * Math.PI * u2);
-      if (i + 1 < years) zs[i + 1] = m * Math.sin(2 * Math.PI * u2);
+    const zEq = new Array(years);
+    const zProp = new Array(years);
+    for (let i = 0; i < years; i++) {
+      const [z1, z2] = randNormPair();
+      zEq[i] = z1;
+      zProp[i] = rho * z1 + rhoComp * z2;
     }
-    const res = project(inp, { light: false, shock: y => zs[y] ?? 0, vol: inp.retVol });
+    const res = project(inp, {
+      mcTrack: true,
+      vol: inp.retVol,
+      shockEq: y => zEq[y] ?? 0,
+      shockProp: y => zProp[y] ?? 0,
+    });
     if (res.buyNet >= res.rentNet) buyWins++;
 
-    equityYearly[0].push(res.actualDeposit);
-    portfolioYearly[0].push(res.renterInitial);
-    for (let y = 0; y < res.rows.length; y++) {
-      equityYearly[y + 1].push(res.rows[y].equity);
-      portfolioYearly[y + 1].push(res.rows[y].portfolio);
+    for (let y = 0; y <= years; y++) {
+      buyYearly[y].push(res.buyNetSeries[y]);
+      rentYearly[y].push(res.rentNetSeries[y]);
     }
   }
 
@@ -458,16 +652,17 @@ function runMonteCarlo(inp, nSims = 400) {
     return sorted[Math.min(idx, sorted.length - 1)];
   };
 
-  const equityP10 = equityYearly.map(arr => percentile(arr, 0.10));
-  const equityP90 = equityYearly.map(arr => percentile(arr, 0.90));
-  const portfolioP10 = portfolioYearly.map(arr => percentile(arr, 0.10));
-  const portfolioP90 = portfolioYearly.map(arr => percentile(arr, 0.90));
+  const buyP10 = buyYearly.map(arr => percentile(arr, 0.10));
+  const buyP90 = buyYearly.map(arr => percentile(arr, 0.90));
+  const rentP10 = rentYearly.map(arr => percentile(arr, 0.10));
+  const rentP90 = rentYearly.map(arr => percentile(arr, 0.90));
 
   return {
     buySuccess: buyWins / nSims,
     n: nSims,
-    equityP10, equityP90,
-    portfolioP10, portfolioP90,
+    rho,
+    buyP10, buyP90,
+    rentP10, rentP90,
   };
 }
 
@@ -502,6 +697,13 @@ const CITY_PRESETS = {
   },
 };
 
+function clearActivePreset() {
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.classList.remove('active');
+    btn.setAttribute('aria-pressed', 'false');
+  });
+}
+
 function applyCityPreset(cityName) {
   const preset = CITY_PRESETS[cityName];
   if (!preset) return;
@@ -510,9 +712,12 @@ function applyCityPreset(cityName) {
     if (el) el.value = val;
   });
   document.querySelectorAll('.preset-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.textContent.toLowerCase().includes(cityName));
+    const isMatch = btn.textContent.toLowerCase().includes(cityName);
+    btn.classList.toggle('active', isMatch);
+    btn.setAttribute('aria-pressed', isMatch ? 'true' : 'false');
   });
-  autoStampDuty();
+  autoStampDuty(true);
+  autoLMI(true);
   calc();
 }
 
@@ -520,9 +725,29 @@ function applyCityPreset(cityName) {
 //  FORMATTING HELPERS
 // ══════════════════════════════════════════════════════════
 
-const fmt  = n => n == null ? '—' : '$' + Math.round(n).toLocaleString('en-AU');
-const fmtK = n => n == null ? '—' : (Math.abs(n) >= 1e6 ? (n < 0 ? '-' : '') + '$' + (Math.abs(n) / 1e6).toFixed(2) + 'M' : (n < 0 ? '-' : '') + '$' + Math.round(Math.abs(n) / 1000) + 'K');
-const pct  = n => (n * 100).toFixed(1) + '%';
+const fmt = n => {
+  if (n == null || !Number.isFinite(n)) return '—';
+  const r = Math.round(n) || 0;
+  return (r < 0 ? '-$' : '$') + Math.abs(r).toLocaleString('en-AU');
+};
+
+const fmtK = n => {
+  if (n == null || !Number.isFinite(n)) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1e6) return (n < 0 ? '-' : '') + '$' + (abs / 1e6).toFixed(2) + 'M';
+  const k = Math.round(abs / 1000);
+  return (n < 0 && k > 0 ? '-' : '') + '$' + k + 'K';
+};
+
+const fmtAxis = v => {
+  if (v == null || !Number.isFinite(v)) return '—';
+  const abs = Math.abs(v);
+  if (abs >= 1e6) return (v < 0 ? '-' : '') + '$' + (abs / 1e6).toFixed(1) + 'M';
+  const k = Math.round(abs / 1000);
+  return (v < 0 && k > 0 ? '-' : '') + '$' + k + 'K';
+};
+
+const pct = n => (n * 100).toFixed(1) + '%';
 
 // ══════════════════════════════════════════════════════════
 //  PERSISTENCE & SHARING
@@ -532,7 +757,7 @@ const STORAGE_KEY = 'au-rentvsbuy-calc-v2';
 
 function collectFormValues() {
   const vals = {};
-  document.querySelectorAll('.input-panel input[id], .input-panel select[id]').forEach(el => {
+  document.querySelectorAll('.input-panel input[id]:not(.range-num-input), .input-panel select[id]').forEach(el => {
     vals[el.id] = el.type === 'checkbox' ? el.checked : el.value;
   });
   return vals;
@@ -582,39 +807,72 @@ function applyUrlParams() {
   return true;
 }
 
+function flashButtonFeedback(btn, label, duration = 1800) {
+  if (!btn) return;
+  if (!btn.dataset.origLabel) btn.dataset.origLabel = btn.textContent;
+  clearTimeout(btn._feedbackTimer);
+  btn.textContent = label;
+  btn._feedbackTimer = setTimeout(() => {
+    btn.textContent = btn.dataset.origLabel;
+  }, duration);
+}
+
 function shareLink() {
   const p = new URLSearchParams();
-  document.querySelectorAll('.input-panel input[id], .input-panel select[id]').forEach(el => {
+  document.querySelectorAll('.input-panel input[id]:not(.range-num-input), .input-panel select[id]').forEach(el => {
     p.set(el.id, el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value);
   });
   const url = location.origin + location.pathname + '?' + p.toString();
   const btn = document.getElementById('share-btn');
-  const done = () => {
-    if (!btn) return;
-    const orig = btn.textContent;
-    btn.textContent = '✓ Copied';
-    setTimeout(() => { btn.textContent = orig; }, 1500);
-  };
-  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done, () => prompt('Copy this link:', url));
-  else prompt('Copy this link:', url);
-}
-
-function copyAuditLogs() {
-  if (!window._lastAuditLog) return alert('No logs generated yet.');
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(window._lastAuditLog).then(() => {
-      alert('✅ Diagnostic audit logs copied to clipboard!');
-    }).catch(() => {
-      prompt('Copy the logs here:', window._lastAuditLog);
-    });
+    navigator.clipboard.writeText(url).then(
+      () => flashButtonFeedback(btn, '✓ Copied'),
+      () => flashButtonFeedback(btn, '⚠ Copy failed')
+    );
   } else {
-    prompt('Copy the logs here:', window._lastAuditLog);
+    flashButtonFeedback(btn, '⚠ Unavailable');
   }
 }
 
+function copyAuditLogs() {
+  const btn = document.getElementById('logs-btn');
+  if (!window._lastAuditLog) {
+    flashButtonFeedback(btn, 'No logs');
+    return;
+  }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(window._lastAuditLog).then(
+      () => flashButtonFeedback(btn, '✓ Copied'),
+      () => flashButtonFeedback(btn, '⚠ Copy failed')
+    );
+  } else {
+    flashButtonFeedback(btn, '⚠ Unavailable');
+  }
+}
+
+let _resetArmed = false;
+let _resetTimer = null;
 function resetDefaults() {
-  if (!confirm('Reset all inputs to defaults?')) return;
-  localStorage.removeItem(STORAGE_KEY);
+  const btn = document.getElementById('reset-btn');
+  if (!_resetArmed) {
+    _resetArmed = true;
+    if (btn) {
+      if (!btn.dataset.origLabel) btn.dataset.origLabel = btn.textContent;
+      btn.textContent = 'Confirm?';
+      btn.classList.add('ctrl-btn-confirm');
+    }
+    _resetTimer = setTimeout(() => {
+      _resetArmed = false;
+      if (btn) {
+        btn.textContent = btn.dataset.origLabel || '↺';
+        btn.classList.remove('ctrl-btn-confirm');
+      }
+    }, 3000);
+    return;
+  }
+  clearTimeout(_resetTimer);
+  _resetArmed = false;
+  try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
   location.href = location.pathname;
 }
 
@@ -631,65 +889,110 @@ function exportCSV() {
   const out = [];
 
   out.push('Australian Rent vs Buy Calculator — Comprehensive Financial Export');
-  out.push('All values in nominal AUD unless labeled NPV or today\'s dollars');
+  out.push("All values in nominal AUD unless labeled NPV or today's dollars");
+  out.push('');
+
+  out.push('=== INPUTS ===');
+  Object.entries(collectFormValues()).forEach(([key, val]) => {
+    out.push(csvRow([key, val]));
+  });
   out.push('');
 
   out.push('=== SUMMARY ===');
   const npvDelta = result.npvRent - result.npvBuy;
   out.push(csvRow(['Analysis Horizon (years)', inp.years]));
+  out.push(csvRow(['Property Mode', inp.isInvestmentProperty ? 'Investment Property' : 'PPOR (Main Residence)']));
+  out.push(csvRow(['CGT Method', inp.cgtMethod === 'fy27' ? 'FY27 CPI Indexation + 30% Floor' : 'Legacy CGT Discount']));
   out.push(csvRow(['NPV of Buying', Math.round(result.npvBuy)]));
   out.push(csvRow(['NPV of Renting', Math.round(result.npvRent)]));
   out.push(csvRow(['NPV Verdict', npvDelta >= 0 ? 'Rent wins' : 'Buy wins']));
   out.push(csvRow(['NPV Margin', Math.round(Math.abs(npvDelta))]));
   out.push(csvRow(['Nominal Buy Net Position', Math.round(result.buyNet)]));
   out.push(csvRow(['Nominal Rent Net Position', Math.round(result.rentNet)]));
+  out.push(csvRow(['Property CGT Paid', Math.round(result.propertyCgt || 0)]));
+  out.push(csvRow(['Renter ETF CGT Paid', Math.round(result.cgt || 0)]));
   out.push(csvRow(['Break-even Year', result.breakevenYear ?? 'Not reached']));
   if (mc) out.push(csvRow(['Monte Carlo Buy Win Rate', pct(mc.buySuccess)]));
   out.push('');
 
+  out.push('=== ALTERNATE SCENARIOS ===');
+  out.push(csvRow(['Scenario', 'Condition', 'NPV Delta (Rent - Buy)', 'NPV Buy', 'NPV Rent', 'Nominal Buy', 'Nominal Rent']));
+  buildScenarios(inp).forEach(sc => {
+    const r = project({ ...inp, ...sc.patch }, { light: true });
+    out.push(csvRow([
+      sc.title, sc.sub,
+      Math.round(r.npvRent - r.npvBuy),
+      Math.round(r.npvBuy), Math.round(r.npvRent),
+      Math.round(r.buyNet), Math.round(r.rentNet),
+    ]));
+  });
+  out.push('');
+
+  out.push('=== BREAK-EVEN SENSITIVITY REPORT ===');
+  out.push(csvRow(['Lever', 'Current Value', 'Break-even Value', 'Change Required']));
+  buildBreakevenItems(inp).forEach(item => {
+    out.push(csvRow([
+      item.title,
+      item.fmtPlain(item.current),
+      item.breakeven == null ? 'Not reachable' : item.fmtPlain(item.breakeven),
+      item.breakeven == null ? '—' : item.fmtPlain(item.breakeven - item.current, true),
+    ]));
+  });
+  out.push('');
+
   out.push('=== YEAR-BY-YEAR PROJECTION ===');
-  out.push(csvRow(['Year', 'Property Value', 'Mortgage Balance', 'Offset Balance', 'Buyer ETF Surplus',
-    'Owner Equity', 'Mortgage Repayment', 'Maintenance', 'Rates/Strata', 'Owner Insurance', 'Land Tax',
-    'Total Owning Cost', 'Annual Rent', 'Renter Insurance', 'Total Renting Cost',
-    'Cash-flow Gap (Renter Savings)', 'Renter Portfolio', 'Dividend Tax']));
+  out.push(csvRow([
+    'Year', 'Property Value', 'Mortgage Balance', 'Offset Balance', 'Buyer ETF Surplus',
+    'Owner Equity', 'Mortgage Repayment', 'Interest Paid', 'Principal Paid',
+    'Maintenance', 'Rates/Strata', 'Owner Insurance', 'Land Tax',
+    'Rental Income (Net)', 'Neg Gearing / Tax Effect', 'Total Owning Cost',
+    'Annual Rent', 'Renter Insurance', 'Total Renting Cost',
+    'Cash-flow Gap', 'Renter Portfolio', 'Dividend Tax',
+    'Buy Net (After Costs/CGT)', 'Rent Net (After Costs/CGT)',
+  ]));
   _lastRows.forEach(r => {
     out.push(csvRow([
       r.year, Math.round(r.propertyValue), Math.round(r.mortgageBalance),
       Math.round(r.offsetBalance || 0), Math.round(r.buyerEtf || 0), Math.round(r.equity),
-      Math.round(r.annualRepayment), Math.round(r.maint), Math.round(r.rates), Math.round(r.ownerIns),
-      Math.round(r.landTax || 0),
-      Math.round(r.ownerCarry), Math.round(r.annualRent), Math.round(r.renterIns), Math.round(r.renterCarry),
+      Math.round(r.annualRepayment), Math.round(r.interestPaid || 0), Math.round(r.principalPaid || 0),
+      Math.round(r.maint), Math.round(r.rates), Math.round(r.ownerIns), Math.round(r.landTax || 0),
+      Math.round(r.annualRentalIncome || 0), Math.round(r.negGearingBenefit || 0), Math.round(r.ownerCarry),
+      Math.round(r.annualRent), Math.round(r.renterIns), Math.round(r.renterCarry),
       Math.round(r.gap), Math.round(r.portfolio), Math.round(r.divTax || 0),
+      Math.round(r.buyNet || 0), Math.round(r.rentNet || 0),
     ]));
   });
 
-  const blob = new Blob([out.join('\n')], { type: 'text/csv' });
+  const blob = new Blob([out.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = 'rent-vs-buy-full-export.csv';
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ══════════════════════════════════════════════════════════
 //  DARK MODE
 // ══════════════════════════════════════════════════════════
 
-function isDark() { return document.body.classList.contains('dark'); }
+function isDark() { return typeof document !== 'undefined' && document.body.classList.contains('dark'); }
 
 function toggleDark() {
   const dark = document.body.classList.toggle('dark');
-  localStorage.setItem('au-rentvsbuy-dark', dark ? '1' : '0');
-  document.getElementById('dark-toggle').textContent = dark ? '☀️' : '🌙';
-  Chart.defaults.color = dark ? '#94A3B8' : '#64748B';
+  try { localStorage.setItem('au-rentvsbuy-dark', dark ? '1' : '0'); } catch (_) {}
+  const btn = document.getElementById('dark-toggle');
+  if (btn) btn.textContent = dark ? '☀️' : '🌙';
+  if (typeof Chart !== 'undefined') Chart.defaults.color = dark ? '#94A3B8' : '#64748B';
   _calc();
 }
 
 function initDark() {
-  const dark = localStorage.getItem('au-rentvsbuy-dark') === '1';
+  let dark = false;
+  try { dark = localStorage.getItem('au-rentvsbuy-dark') === '1'; } catch (_) {}
   if (dark) {
     document.body.classList.add('dark');
-    Chart.defaults.color = '#94A3B8';
+    if (typeof Chart !== 'undefined') Chart.defaults.color = '#94A3B8';
   }
   const btn = document.getElementById('dark-toggle');
   if (btn) btn.textContent = dark ? '☀️' : '🌙';
@@ -700,7 +1003,11 @@ function initDark() {
 // ══════════════════════════════════════════════════════════
 
 function toggleSection(id) {
-  document.getElementById(id).classList.toggle('collapsed');
+  const sec = document.getElementById(id);
+  if (!sec) return;
+  const collapsed = sec.classList.toggle('collapsed');
+  const hdr = sec.querySelector('.section-header');
+  if (hdr) hdr.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
 function toggleVis(id, show) {
@@ -713,91 +1020,126 @@ function switchMobileTab(tab) {
   const resultsPanel = document.getElementById('results-panel');
   const tabInputs = document.getElementById('tab-btn-inputs');
   const tabResults = document.getElementById('tab-btn-results');
+  if (!inputPanel || !resultsPanel) return;
 
   if (tab === 'inputs') {
     inputPanel.classList.remove('mobile-hidden');
     resultsPanel.classList.add('mobile-hidden');
-    tabInputs.classList.add('active');
-    tabResults.classList.remove('active');
+    tabInputs?.classList.add('active');
+    tabResults?.classList.remove('active');
+    tabInputs?.setAttribute('aria-selected', 'true');
+    tabResults?.setAttribute('aria-selected', 'false');
   } else {
     inputPanel.classList.add('mobile-hidden');
     resultsPanel.classList.remove('mobile-hidden');
-    tabInputs.classList.remove('active');
-    tabResults.classList.add('active');
+    tabInputs?.classList.remove('active');
+    tabResults?.classList.add('active');
+    tabInputs?.setAttribute('aria-selected', 'false');
+    tabResults?.setAttribute('aria-selected', 'true');
+    requestAnimationFrame(() => {
+      Object.values(charts).forEach(c => { if (c && typeof c.resize === 'function') c.resize(); });
+    });
   }
 }
 
 function syncRange(el, lblId, pre, suf) {
+  if (!el) return;
   const v = parseFloat(el.value);
   const lbl = document.getElementById(lblId);
-  if (lbl) lbl.textContent = pre + v + suf;
+  if (lbl && !isNaN(v)) lbl.textContent = pre + v + suf;
   const min = parseFloat(el.min || 0), max = parseFloat(el.max || 100);
-  el.style.setProperty('--val', ((v - min) / (max - min) * 100).toFixed(1) + '%');
+  const pctVal = max > min ? Math.min(100, Math.max(0, (v - min) / (max - min) * 100)) : 0;
+  el.style.setProperty('--val', pctVal.toFixed(1) + '%');
 }
 
 function syncDualInput(sourceId, targetId, lblId, pre, suf) {
   const src = document.getElementById(sourceId);
   const tgt = document.getElementById(targetId);
   if (!src) return;
-  const v = parseFloat(src.value);
-  if (tgt && !isNaN(v)) tgt.value = v;
+  const rawV = parseFloat(src.value);
+  if (isNaN(rawV)) return;
+  const min = parseFloat(src.min !== '' ? src.min : (tgt?.min || 0));
+  const max = parseFloat(src.max !== '' ? src.max : (tgt?.max || 100));
+  const clamped = Math.min(max, Math.max(min, rawV));
+  if (tgt) tgt.value = clamped;
   const lbl = document.getElementById(lblId);
-  if (lbl && !isNaN(v)) lbl.textContent = pre + v + suf;
-  const min = parseFloat(src.min || 0), max = parseFloat(src.max || 100);
-  src.style.setProperty('--val', ((v - min) / (max - min) * 100).toFixed(1) + '%');
-  if (tgt && tgt.type === 'range') {
-    tgt.style.setProperty('--val', ((v - min) / (max - min) * 100).toFixed(1) + '%');
-  }
+  if (lbl) lbl.textContent = pre + clamped + suf;
+  const pctVal = max > min ? Math.min(100, Math.max(0, (clamped - min) / (max - min) * 100)) : 0;
+  if (src.type === 'range') src.style.setProperty('--val', pctVal.toFixed(1) + '%');
+  if (tgt && tgt.type === 'range') tgt.style.setProperty('--val', pctVal.toFixed(1) + '%');
 }
 
+const DUAL_INPUT_PAIRS = [
+  ['years', 'yearsNum', 'lbl-years', '', ' yrs'],
+  ['taxRate', 'taxRateNum', 'lbl-taxrate', '', '%'],
+  ['propertyGrowth', 'propertyGrowthNum', 'lbl-propgrowth', '', '%'],
+  ['agentFeeRate', 'agentFeeRateNum', 'lbl-agent', '', '%'],
+  ['maintenanceRate', 'maintenanceRateNum', 'lbl-maint', '', '%'],
+  ['bodyCorpGrowth', 'bodyCorpGrowthNum', 'lbl-bcgrowth', '', '%'],
+  ['rentGrowth', 'rentGrowthNum', 'lbl-rentgrowth', '', '%'],
+  ['investReturn', 'investReturnNum', 'lbl-invret', '', '%'],
+  ['dividendYield', 'dividendYieldNum', 'lbl-divyield', '', '%'],
+  ['frankingLevel', 'frankingLevelNum', 'lbl-franking', '', '%'],
+  ['etfSellFeeRate', 'etfSellFeeRateNum', 'lbl-etfsell', '', '%'],
+  ['inflation', 'inflationNum', 'lbl-inflation', '', '%'],
+  ['retVol', 'retVolNum', 'lbl-vol', '', '%'],
+];
+
 function updateRangeLabels() {
-  [
-    ['years', 'yearsNum', 'lbl-years', '', ' yrs'],
-    ['taxRate', 'taxRateNum', 'lbl-taxrate', '', '%'],
-    ['propertyGrowth', 'propertyGrowthNum', 'lbl-propgrowth', '', '%'],
-    ['agentFeeRate', 'agentFeeRateNum', 'lbl-agent', '', '%'],
-    ['maintenanceRate', 'maintenanceRateNum', 'lbl-maint', '', '%'],
-    ['bodyCorpGrowth', 'bodyCorpGrowthNum', 'lbl-bcgrowth', '', '%'],
-    ['rentGrowth', 'rentGrowthNum', 'lbl-rentgrowth', '', '%'],
-    ['investReturn', 'investReturnNum', 'lbl-invret', '', '%'],
-    ['dividendYield', 'dividendYieldNum', 'lbl-divyield', '', '%'],
-    ['frankingLevel', 'frankingLevelNum', 'lbl-franking', '', '%'],
-    ['etfSellFeeRate', 'etfSellFeeRateNum', 'lbl-etfsell', '', '%'],
-    ['inflation', 'inflationNum', 'lbl-inflation', '', '%'],
-    ['retVol', 'retVolNum', 'lbl-vol', '', '%'],
-  ].forEach(([rangeId, numId, lbl, pre, suf]) => {
+  DUAL_INPUT_PAIRS.forEach(([rangeId, numId, lbl, pre, suf]) => {
     syncDualInput(rangeId, numId, lbl, pre, suf);
   });
 }
 
-function autoStampDuty() {
-  const price = parseFloat(document.getElementById('propertyPrice').value) || 0;
+function autoStampDuty(silent = false) {
+  const price = parseFloat(document.getElementById('propertyPrice')?.value) || 0;
   const fhb = document.getElementById('firstHomeBuyer')?.checked;
   const state = document.getElementById('state')?.value || 'NSW';
-  document.getElementById('stampDuty').value = estimateStampDuty(price, fhb, state);
-  calc();
+  const isIP = document.getElementById('isInvestmentProperty')?.checked;
+  const el = document.getElementById('stampDuty');
+  if (el) el.value = estimateStampDuty(price, fhb, state, isIP);
+  if (!silent) calc();
 }
 
 function setMinDeposit() {
-  const price = parseFloat(document.getElementById('propertyPrice').value) || 0;
-  document.getElementById('deposit').value = Math.round(price * 0.2 / 500) * 500;
+  const price = parseFloat(document.getElementById('propertyPrice')?.value) || 0;
+  const el = document.getElementById('deposit');
+  if (el) el.value = Math.round(price * 0.2 / 500) * 500;
+  clearActivePreset();
   calc();
 }
 
-function autoLMI() {
-  const price = parseFloat(document.getElementById('propertyPrice').value) || 0;
-  const totalSavings = parseFloat(document.getElementById('totalSavings').value) || 0;
-  const deposit = Math.min(parseFloat(document.getElementById('deposit').value) || 0, totalSavings);
-  const stampDuty = parseFloat(document.getElementById('stampDuty').value) || 0;
-  const financeStampDuty = document.getElementById('financeStampDuty').checked;
-  const loan = Math.max(0, price - deposit + (financeStampDuty ? stampDuty : 0));
-  document.getElementById('lmiAmount').value = estimateLMI(loan, price);
+function autoLMI(silent = false) {
+  const inp = getInputs();
+  const preLmiUpfront = Math.max(0, (inp.financeStampDuty ? 0 : inp.stampDuty) + inp.legalFeesBuy - inp.fhogAmount);
+  const maxDep1 = Math.max(0, inp.totalSavings - preLmiUpfront);
+  const dep1 = Math.min(inp.deposit, maxDep1);
+  const baseLoan = Math.max(0, inp.propertyPrice - dep1 + (inp.financeStampDuty ? inp.stampDuty : 0));
+  let lmi = estimateLMI(baseLoan, inp.propertyPrice);
+  if (!inp.financeLMI && lmi > 0) {
+    const maxDep2 = Math.max(0, inp.totalSavings - preLmiUpfront - lmi);
+    const dep2 = Math.min(inp.deposit, maxDep2);
+    const loan2 = Math.max(0, inp.propertyPrice - dep2 + (inp.financeStampDuty ? inp.stampDuty : 0));
+    lmi = estimateLMI(loan2, inp.propertyPrice);
+  }
+  const el = document.getElementById('lmiAmount');
+  if (el) el.value = lmi;
+  if (!silent) calc();
+}
+
+function onInvestmentPropertyToggle(checked) {
+  const mrEl = document.getElementById('mainResidence');
+  if (mrEl) mrEl.checked = !checked;
+  updateConditionalUI();
+  autoStampDuty(true);
   calc();
 }
 
 function updateConditionalUI() {
   toggleVis('investment-fields', document.getElementById('isInvestmentProperty')?.checked);
-  toggleVis('legacy-cgt-fields', document.getElementById('cgtMethod')?.value === 'legacy');
+  const isLegacy = document.getElementById('cgtMethod')?.value === 'legacy';
+  toggleVis('legacy-cgt-fields', isLegacy);
+  toggleVis('pensioner-field', !isLegacy);
   const incomeMode = document.getElementById('taxRateMethod')?.value !== 'flat';
   toggleVis('income-tax-fields', incomeMode);
   toggleVis('flat-tax-field', !incomeMode);
@@ -810,7 +1152,7 @@ function getInputs() {
   const sel = id => { const el = g(id); return el ? el.value : ''; };
 
   return {
-    years: parseInt(g('years').value, 10) || 10,
+    years: parseInt(g('years')?.value, 10) || 10,
     taxRateMethod: sel('taxRateMethod') || 'income',
     grossSalary: num('grossSalary'),
     salaryGrowth: chk('salaryGrowth'),
@@ -880,19 +1222,17 @@ function isMobileView() {
   return typeof window !== 'undefined' && window.innerWidth < 640;
 }
 
-Chart.defaults.font.family = "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif";
-Chart.defaults.font.size   = isMobileView() ? 10 : 11;
-Chart.defaults.color       = '#64748B';
-
 const msLinesPlugin = {
   id: 'msLines',
   afterDatasetsDraw(chart, args, options) {
     const lines = options.lines || [];
     const xs = chart.scales.x, area = chart.chartArea, ctx = chart.ctx;
+    if (!xs || !area) return;
     lines.forEach(({ idx, color, label }) => {
       if (idx == null || idx < 0) return;
       const px = xs.getPixelForValue(idx);
       if (px < area.left || px > area.right) return;
+      const nearRight = (area.right - px) < 28;
       ctx.save();
       ctx.strokeStyle = color;
       ctx.setLineDash([4, 4]);
@@ -906,56 +1246,79 @@ const msLinesPlugin = {
       ctx.textAlign = 'left';
       ctx.translate(px, area.top);
       ctx.rotate(Math.PI / 2);
-      ctx.fillText(label, 6, -5);
+      ctx.fillText(label, 6, nearRight ? 11 : -5);
       ctx.restore();
     });
   },
 };
-Chart.register(msLinesPlugin);
+
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.font.family = "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif";
+  Chart.defaults.font.size   = isMobileView() ? 10 : 11;
+  Chart.defaults.color       = '#64748B';
+  Chart.register(msLinesPlugin);
+}
 
 function gc() { return isDark() ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'; }
 
+function ensureChartAvailable(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  if (typeof Chart === 'undefined') {
+    const wrap = canvas.parentElement;
+    if (wrap && !wrap.querySelector('.chart-offline')) {
+      const msg = document.createElement('div');
+      msg.className = 'chart-offline';
+      msg.textContent = 'Chart library unavailable offline — see the summary cards and year-by-year table below.';
+      wrap.appendChild(msg);
+      canvas.style.display = 'none';
+    }
+    return null;
+  }
+  return canvas.getContext('2d');
+}
+
 function buildProjectionChart(rows, result, inp, mc) {
-  const ctx = document.getElementById('chart-projection').getContext('2d');
+  const ctx = ensureChartAvailable('chart-projection');
+  if (!ctx) return;
   const isD = isDark();
   const isM = isMobileView();
   const G = gc();
 
   const labels = ['Yr 0', ...rows.map(r => `Yr ${r.year}`)];
-  const equityData = [result.actualDeposit, ...rows.map(r => r.equity)];
-  const portData   = [result.renterInitial, ...rows.map(r => r.portfolio)];
+  const buyNetData  = [result.year0BuyNet, ...rows.map(r => r.buyNet)];
+  const rentNetData = [result.year0RentNet, ...rows.map(r => r.rentNet)];
 
   const datasets = [];
 
-  // Render Monte Carlo confidence band if enabled
-  if (mc && mc.equityP10 && mc.equityP90) {
+  if (mc && mc.buyP10 && mc.buyP90) {
     datasets.push({
-      label: 'Owner Equity (90th percentile)',
-      data: mc.equityP90,
+      label: 'Buy Net (90th percentile)',
+      data: mc.buyP90,
       borderColor: 'transparent',
-      backgroundColor: isD ? 'rgba(52, 211, 153, 0.08)' : 'rgba(5, 150, 105, 0.08)',
+      backgroundColor: isD ? 'rgba(52, 211, 153, 0.14)' : 'rgba(5, 150, 105, 0.13)',
       pointRadius: 0,
       fill: '+1',
     });
     datasets.push({
-      label: 'Owner Equity (10th percentile)',
-      data: mc.equityP10,
+      label: 'Buy Net (10th percentile)',
+      data: mc.buyP10,
       borderColor: 'transparent',
       backgroundColor: 'transparent',
       pointRadius: 0,
       fill: false,
     });
     datasets.push({
-      label: 'Renter Portfolio (90th percentile)',
-      data: mc.portfolioP90,
+      label: 'Rent Net (90th percentile)',
+      data: mc.rentP90,
       borderColor: 'transparent',
-      backgroundColor: isD ? 'rgba(96, 165, 250, 0.08)' : 'rgba(37, 99, 235, 0.08)',
+      backgroundColor: isD ? 'rgba(96, 165, 250, 0.14)' : 'rgba(37, 99, 235, 0.13)',
       pointRadius: 0,
       fill: '+1',
     });
     datasets.push({
-      label: 'Renter Portfolio (10th percentile)',
-      data: mc.portfolioP10,
+      label: 'Rent Net (10th percentile)',
+      data: mc.rentP10,
       borderColor: 'transparent',
       backgroundColor: 'transparent',
       pointRadius: 0,
@@ -964,11 +1327,11 @@ function buildProjectionChart(rows, result, inp, mc) {
   }
 
   datasets.push({
-    label: 'Owner Equity',
-    data: equityData,
+    label: 'Buy Net Position',
+    data: buyNetData,
     borderColor: isD ? '#34D399' : '#059669',
-    backgroundColor: isD ? 'rgba(52, 211, 153, 0.15)' : 'rgba(5, 150, 105, 0.10)',
-    fill: true,
+    backgroundColor: isD ? 'rgba(52, 211, 153, 0.14)' : 'rgba(5, 150, 105, 0.10)',
+    fill: !mc,
     tension: 0.35,
     borderWidth: 2.5,
     pointRadius: 0,
@@ -976,11 +1339,11 @@ function buildProjectionChart(rows, result, inp, mc) {
   });
 
   datasets.push({
-    label: 'Renter Portfolio',
-    data: portData,
+    label: 'Rent Net Position',
+    data: rentNetData,
     borderColor: isD ? '#60A5FA' : '#2563EB',
-    backgroundColor: isD ? 'rgba(96, 165, 250, 0.15)' : 'rgba(37, 99, 235, 0.10)',
-    fill: true,
+    backgroundColor: isD ? 'rgba(96, 165, 250, 0.14)' : 'rgba(37, 99, 235, 0.10)',
+    fill: !mc,
     tension: 0.35,
     borderWidth: 2.5,
     pointRadius: 0,
@@ -1014,8 +1377,9 @@ function buildProjectionChart(rows, result, inp, mc) {
         tooltip: {
           padding: 8,
           bodyFont: { size: 11 },
+          filter: item => !item.dataset.label.includes('percentile'),
           callbacks: {
-            label: c => c.dataset.label.includes('percentile') ? '' : ` ${c.dataset.label}: ${fmt(c.parsed.y)}`,
+            label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}`,
           },
         },
       },
@@ -1032,7 +1396,7 @@ function buildProjectionChart(rows, result, inp, mc) {
         y: {
           grid: { color: G },
           ticks: {
-            callback: v => v >= 1e6 ? '$' + (v / 1e6).toFixed(1) + 'M' : '$' + (v / 1000).toFixed(0) + 'K',
+            callback: v => fmtAxis(v),
             maxTicksLimit: 6,
             font: { size: isM ? 9.5 : 11 },
           },
@@ -1043,7 +1407,8 @@ function buildProjectionChart(rows, result, inp, mc) {
 }
 
 function buildFinalChart(result) {
-  const ctx = document.getElementById('chart-final').getContext('2d');
+  const ctx = ensureChartAvailable('chart-final');
+  if (!ctx) return;
   const isD = isDark();
   const isM = isMobileView();
   const labels = ['Buy', 'Rent & Invest'];
@@ -1072,7 +1437,7 @@ function buildFinalChart(result) {
         y: {
           grid: { color: gc() },
           ticks: {
-            callback: v => v >= 1e6 ? '$' + (v / 1e6).toFixed(1) + 'M' : '$' + (v / 1000).toFixed(0) + 'K',
+            callback: v => fmtAxis(v),
             maxTicksLimit: 5,
             font: { size: isM ? 9.5 : 11 },
           },
@@ -1083,7 +1448,8 @@ function buildFinalChart(result) {
 }
 
 function buildOwnCostChart(row) {
-  const ctx = document.getElementById('chart-owncost').getContext('2d');
+  const ctx = ensureChartAvailable('chart-owncost');
+  if (!ctx) return;
   const isD = isDark();
   const isM = isMobileView();
   const raw = [row.annualRepayment, row.maint, row.rates, row.ownerIns, row.landTax || 0];
@@ -1092,19 +1458,31 @@ function buildOwnCostChart(row) {
   const vals = raw.map((v, i) => ({ v, l: labels[i], c: colors[i] })).filter(x => x.v > 0);
   const grossCost = vals.reduce((s, x) => s + x.v, 0);
 
+  const chartData = vals.length > 0
+    ? {
+        labels: vals.map(x => x.l),
+        datasets: [{
+          data: vals.map(x => x.v),
+          backgroundColor: vals.map(x => x.c + 'DD'),
+          borderColor: vals.map(x => x.c),
+          borderWidth: 1.5,
+          hoverOffset: 4,
+        }],
+      }
+    : {
+        labels: ['No ongoing costs'],
+        datasets: [{
+          data: [1],
+          backgroundColor: [isD ? '#334155' : '#E2E8F0'],
+          borderColor: [isD ? '#475569' : '#CBD5E1'],
+          borderWidth: 1,
+        }],
+      };
+
   if (charts.owncost) charts.owncost.destroy();
   charts.owncost = new Chart(ctx, {
     type: 'doughnut',
-    data: {
-      labels: vals.map(x => x.l),
-      datasets: [{
-        data: vals.map(x => x.v),
-        backgroundColor: vals.map(x => x.c + 'DD'),
-        borderColor: vals.map(x => x.c),
-        borderWidth: 1.5,
-        hoverOffset: 4,
-      }],
-    },
+    data: chartData,
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -1117,7 +1495,9 @@ function buildOwnCostChart(row) {
         tooltip: {
           padding: 8,
           callbacks: {
-            label: c => ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / Math.max(1, grossCost) * 100).toFixed(0)}%)`,
+            label: c => vals.length > 0
+              ? ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / Math.max(1, grossCost) * 100).toFixed(0)}%)`
+              : ' No ongoing costs: $0',
           },
         },
       },
@@ -1126,7 +1506,8 @@ function buildOwnCostChart(row) {
 }
 
 function buildGapChart(rows) {
-  const ctx = document.getElementById('chart-gap').getContext('2d');
+  const ctx = ensureChartAvailable('chart-gap');
+  if (!ctx) return;
   const isD = isDark();
   const isM = isMobileView();
   const G = gc();
@@ -1170,7 +1551,7 @@ function buildGapChart(rows) {
         y: {
           grid: { color: G },
           ticks: {
-            callback: v => '$' + (v / 1000).toFixed(0) + 'K',
+            callback: v => fmtAxis(v),
             maxTicksLimit: 5,
             font: { size: isM ? 9.5 : 11 },
           },
@@ -1181,7 +1562,8 @@ function buildGapChart(rows) {
 }
 
 function buildEquityChart(rows) {
-  const ctx = document.getElementById('chart-equity').getContext('2d');
+  const ctx = ensureChartAvailable('chart-equity');
+  if (!ctx) return;
   const isD = isDark();
   const isM = isMobileView();
   const G = gc();
@@ -1217,7 +1599,7 @@ function buildEquityChart(rows) {
         y: {
           grid: { color: G },
           ticks: {
-            callback: v => v >= 1e6 ? '$' + (v / 1e6).toFixed(1) + 'M' : '$' + (v / 1000).toFixed(0) + 'K',
+            callback: v => fmtAxis(v),
             maxTicksLimit: 6,
             font: { size: isM ? 9.5 : 11 },
           },
@@ -1235,8 +1617,9 @@ function renderHero(inp, result, mc) {
   const el = document.getElementById('hero');
   if (!el) return;
 
+  const buyLabel = inp.isInvestmentProperty ? 'Buying (Investment)' : 'Buying (PPOR)';
   const npvDelta = result.npvRent - result.npvBuy;
-  const npvWinner = npvDelta >= 0 ? 'Renting &amp; Investing' : 'Buying (PPOR)';
+  const npvWinner = npvDelta >= 0 ? 'Renting &amp; Investing' : buyLabel;
   const npvMargin = Math.abs(npvDelta);
   const kicker = `Over a ${inp.years}-Year Horizon · In Today's Dollars (NPV @ ${(inp.npvDiscountRate * 100).toFixed(1)}%)`;
 
@@ -1254,7 +1637,7 @@ function renderHero(inp, result, mc) {
   let mcChip = '';
   if (mc) {
     const s = Math.round(mc.buySuccess * 100);
-    mcChip = `<span class="chip mc-badge ${s >= 50 ? 'good' : 'bad'}" title="Share of ${mc.n} Monte Carlo simulation runs favoring Buying">Monte Carlo: <b>${s}%</b> favor Buying</span>`;
+    mcChip = `<span class="chip mc-badge ${s >= 50 ? 'good' : 'bad'}" title="Share of ${mc.n} Monte Carlo simulation runs favoring Buying (ρ=${mc.rho})">Monte Carlo: <b>${s}%</b> favor Buying</span>`;
   }
 
   const breakevenChip = result.breakevenYear != null
@@ -1304,15 +1687,28 @@ function renderCard(prefix, valueLabel, subNumber, descLines, progressPct, pctLa
 //  SCENARIO ANALYSIS
 // ══════════════════════════════════════════════════════════
 
-function renderScenarios(inp, result) {
+function buildScenarios(inp) {
+  return [
+    { icon: '📈', title: 'Higher Property Growth', sub: `+1.5% p.a. (${((inp.propertyGrowth + 0.015) * 100).toFixed(1)}%)`, patch: { propertyGrowth: inp.propertyGrowth + 0.015 } },
+    { icon: '📉', title: 'Lower Property Growth', sub: `-1.5% p.a. (${((inp.propertyGrowth - 0.015) * 100).toFixed(1)}%)`, patch: { propertyGrowth: inp.propertyGrowth - 0.015 } },
+    { icon: '💹', title: 'Higher Investment Return', sub: `+2.0% p.a. (${((inp.investReturn + 0.02) * 100).toFixed(1)}%)`, patch: { investReturn: inp.investReturn + 0.02 } },
+    { icon: '🏦', title: 'Higher Interest Rate', sub: `+1.5% p.a. (${((inp.mortgageRate + 0.015) * 100).toFixed(1)}%)`, patch: { mortgageRate: inp.mortgageRate + 0.015 } },
+    { icon: '🏠', title: 'Faster Rent Growth', sub: `+2.0% p.a. (${((inp.rentGrowth + 0.02) * 100).toFixed(1)}%)`, patch: { rentGrowth: inp.rentGrowth + 0.02 } },
+    { icon: '⏳', title: 'Longer Horizon', sub: `${inp.years + 10} years`, patch: { years: inp.years + 10 } },
+  ];
+}
+
+function renderScenarios(inp) {
   const el = document.getElementById('scenario-grid');
   if (!el) return;
 
-  const scCard = (icon, title, sub, delta, footer) => {
-    const favoursBuy = delta < 0;
-    const cls = favoursBuy ? 'ready' : 'gap';
-    const badgeCls = favoursBuy ? 'sc-badge-ready' : 'sc-badge-gap';
-    const badgeLabel = Math.abs(delta) < 1000 ? 'Toss-up' : (favoursBuy ? 'Favours Buy' : 'Favours Rent');
+  const scCard = (icon, title, sub, npvDelta, footer) => {
+    const isTossup = Math.abs(npvDelta) < 1000;
+    const favoursBuy = npvDelta < 0;
+    const cls = isTossup ? 'neutral' : (favoursBuy ? 'ready' : 'gap');
+    const badgeCls = isTossup ? 'sc-badge-neutral' : (favoursBuy ? 'sc-badge-ready' : 'sc-badge-gap');
+    const badgeLabel = isTossup ? 'Toss-up' : (favoursBuy ? 'Favours Buy' : 'Favours Rent');
+    const valCls = isTossup ? '' : (npvDelta >= 0 ? 'sc-blue' : 'sc-green');
     return `
     <div class="sc-card ${cls}">
       <div class="sc-head">
@@ -1324,25 +1720,17 @@ function renderScenarios(inp, result) {
         <div class="sc-badge ${badgeCls}">${badgeLabel}</div>
       </div>
       <div class="sc-body">
-        <div class="sc-row"><span>Δ Net Position (Rent − Buy)</span><span class="${delta >= 0 ? 'sc-blue' : 'sc-green'}">${fmtK(delta)}</span></div>
+        <div class="sc-row"><span>Δ NPV (Rent − Buy)</span><span class="${valCls}">${fmtK(npvDelta)}</span></div>
       </div>
       ${footer ? `<div class="sc-foot">${footer}</div>` : ''}
     </div>`;
   };
 
-  const scenarios = [
-    { icon: '📈', title: 'Higher Property Growth', sub: `+1.5% p.a. (${((inp.propertyGrowth + 0.015) * 100).toFixed(1)}%)`, patch: { propertyGrowth: inp.propertyGrowth + 0.015 } },
-    { icon: '📉', title: 'Lower Property Growth', sub: `-1.5% p.a. (${Math.max(0, (inp.propertyGrowth - 0.015) * 100).toFixed(1)}%)`, patch: { propertyGrowth: inp.propertyGrowth - 0.015 } },
-    { icon: '💹', title: 'Higher Investment Return', sub: `+2.0% p.a. (${((inp.investReturn + 0.02) * 100).toFixed(1)}%)`, patch: { investReturn: inp.investReturn + 0.02 } },
-    { icon: '🏦', title: 'Higher Interest Rate', sub: `+1.5% p.a. (${((inp.mortgageRate + 0.015) * 100).toFixed(1)}%)`, patch: { mortgageRate: inp.mortgageRate + 0.015 } },
-    { icon: '🏠', title: 'Faster Rent Growth', sub: `+2.0% p.a. (${((inp.rentGrowth + 0.02) * 100).toFixed(1)}%)`, patch: { rentGrowth: inp.rentGrowth + 0.02 } },
-    { icon: '⏳', title: 'Longer Horizon', sub: `${inp.years + 10} years`, patch: { years: inp.years + 10 } },
-  ];
-
-  el.innerHTML = scenarios.map(sc => {
-    const testRes = project({ ...inp, ...sc.patch });
-    const footer = `Buy: ${fmtK(testRes.buyNet)} · Rent: ${fmtK(testRes.rentNet)}`;
-    return scCard(sc.icon, sc.title, sc.sub, testRes.delta, footer);
+  el.innerHTML = buildScenarios(inp).map(sc => {
+    const testRes = project({ ...inp, ...sc.patch }, { light: true });
+    const npvDelta = testRes.npvRent - testRes.npvBuy;
+    const footer = `NPV Buy: ${fmtK(testRes.npvBuy)} · NPV Rent: ${fmtK(testRes.npvRent)} (Nominal: ${fmtK(testRes.buyNet)} vs ${fmtK(testRes.rentNet)})`;
+    return scCard(sc.icon, sc.title, sc.sub, npvDelta, footer);
   }).join('');
 }
 
@@ -1365,29 +1753,90 @@ function solveBreakeven(f, lo, hi, iterations = 40) {
   return (lo + hi) / 2;
 }
 
-function renderBreakevenReport(inp, result) {
-  const el = document.getElementById('breakeven-grid');
-  if (!el) return;
-
+function buildBreakevenItems(inp) {
   const npvDiff = (field, value) => {
-    const r = project({ ...inp, [field]: value });
+    const r = project({ ...inp, [field]: value }, { light: true });
+    return r.npvRent - r.npvBuy;
+  };
+  const npvDiffPrice = price => {
+    const duty = estimateStampDuty(price, inp.firstHomeBuyer, inp.state, inp.isInvestmentProperty);
+    const r = project({ ...inp, propertyPrice: price, stampDuty: duty }, { light: true });
     return r.npvRent - r.npvBuy;
   };
 
-  const card = (icon, title, current, breakeven, fmtVal, note) => {
+  const pctVal = (v, delta) => (delta && v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%';
+  const dollarVal = (v, delta) => (delta && v >= 0 ? '+' : '') + fmt(v);
+
+  return [
+    {
+      icon: '🔑', title: 'Weekly Rent', current: inp.weeklyRent,
+      breakeven: solveBreakeven(x => npvDiff('weeklyRent', x), 0, Math.max(2000, inp.weeklyRent * 5)),
+      fmtVal: dollarVal, fmtPlain: dollarVal,
+      note: 'Starting weekly rent that equalises NPV of both paths.',
+    },
+    {
+      icon: '📈', title: 'Rent Growth Rate', current: inp.rentGrowth,
+      breakeven: solveBreakeven(x => npvDiff('rentGrowth', x), -0.05, 0.20),
+      fmtVal: pctVal, fmtPlain: pctVal,
+      note: 'Annual rent escalation rate required to equalise outcomes.',
+    },
+    {
+      icon: '🏦', title: 'Mortgage Interest Rate', current: inp.mortgageRate,
+      breakeven: solveBreakeven(x => npvDiff('mortgageRate', x), 0, 0.25),
+      fmtVal: pctVal, fmtPlain: pctVal,
+      note: 'Mortgage rate that equalises buying and renting.',
+    },
+    {
+      icon: '🏠', title: 'Property Capital Growth', current: inp.propertyGrowth,
+      breakeven: solveBreakeven(x => npvDiff('propertyGrowth', x), -0.10, 0.25),
+      fmtVal: pctVal, fmtPlain: pctVal,
+      note: 'Annual capital growth needed for net equity to match portfolio.',
+    },
+    {
+      icon: '💹', title: 'ETF Investment Return', current: inp.investReturn,
+      breakeven: solveBreakeven(x => npvDiff('investReturn', x), -0.05, 0.30),
+      fmtVal: pctVal, fmtPlain: pctVal,
+      note: 'Total investment return needed for portfolio to match equity.',
+    },
+    {
+      icon: '💰', title: 'Property Purchase Price', current: inp.propertyPrice,
+      breakeven: solveBreakeven(npvDiffPrice, inp.propertyPrice * 0.2, inp.propertyPrice * 3),
+      fmtVal: dollarVal, fmtPlain: dollarVal,
+      note: 'Purchase price (incl. auto stamp duty) that equalises the outcome.',
+    },
+    {
+      icon: '🧾', title: 'Council Rates', current: inp.councilRates,
+      breakeven: solveBreakeven(x => npvDiff('councilRates', x), 0, inp.councilRates * 8 + 5000),
+      fmtVal: dollarVal, fmtPlain: dollarVal,
+      note: 'Annual municipal rates required to reach break-even.',
+    },
+    {
+      icon: '🔧', title: 'Maintenance Rate', current: inp.maintenanceRate,
+      breakeven: solveBreakeven(x => npvDiff('maintenanceRate', x), 0, 0.10),
+      fmtVal: pctVal, fmtPlain: pctVal,
+      note: 'Annual maintenance cost (% of value) required to equalise.',
+    },
+  ];
+}
+
+function renderBreakevenReport(inp) {
+  const el = document.getElementById('breakeven-grid');
+  if (!el) return;
+
+  const card = ({ icon, title, current, breakeven, fmtVal, note }) => {
     if (breakeven == null) {
       return `
-      <div class="sc-card gap">
+      <div class="sc-card neutral">
         <div class="sc-head">
           <div class="sc-icon">${icon}</div>
           <div class="sc-titlewrap">
             <div class="sc-title">${title}</div>
             <div class="sc-sub">No break-even point in realistic range</div>
           </div>
-          <div class="sc-badge sc-badge-gap">Not reachable</div>
+          <div class="sc-badge sc-badge-neutral">Not reachable</div>
         </div>
         <div class="sc-body">
-          <div class="sc-row"><span>Current</span><span>${fmtVal(current)}</span></div>
+          <div class="sc-row"><span>Current</span><span>${fmtVal(current, false)}</span></div>
         </div>
         ${note ? `<div class="sc-foot">${note}</div>` : ''}
       </div>`;
@@ -1395,79 +1844,62 @@ function renderBreakevenReport(inp, result) {
     const movedUp = breakeven > current;
     const badgeLabel = Math.abs(breakeven - current) < 1e-6 ? 'Already even' : (movedUp ? 'Needs to rise' : 'Needs to fall');
     return `
-    <div class="sc-card ready">
+    <div class="sc-card breakeven-hit">
       <div class="sc-head">
         <div class="sc-icon">${icon}</div>
         <div class="sc-titlewrap">
           <div class="sc-title">${title}</div>
-          <div class="sc-sub">Current: ${fmtVal(current)}</div>
+          <div class="sc-sub">Current: ${fmtVal(current, false)}</div>
         </div>
-        <div class="sc-badge sc-badge-ready">${badgeLabel}</div>
+        <div class="sc-badge sc-badge-breakeven">${badgeLabel}</div>
       </div>
       <div class="sc-body">
-        <div class="sc-row"><span>Break-even Value</span><span class="sc-green">${fmtVal(breakeven)}</span></div>
-        <div class="sc-row"><span>Required Change</span><span>${movedUp ? '+' : ''}${fmtVal(breakeven - current, true)}</span></div>
+        <div class="sc-row"><span>Break-even Value</span><span class="sc-amber">${fmtVal(breakeven, false)}</span></div>
+        <div class="sc-row"><span>Required Change</span><span>${fmtVal(breakeven - current, true)}</span></div>
       </div>
       ${note ? `<div class="sc-foot">${note}</div>` : ''}
     </div>`;
   };
 
-  const pctVal = (v, delta) => (delta ? (v * 100 >= 0 ? '+' : '') : '') + (v * 100).toFixed(2) + '%';
-  const dollarVal = (v, delta) => (delta && v >= 0 ? '+' : '') + fmt(v);
-
-  const rows = [];
-  rows.push(card('🔑', 'Weekly Rent', inp.weeklyRent, solveBreakeven(x => npvDiff('weeklyRent', x), 0, inp.weeklyRent * 5), dollarVal,
-    'Starting weekly rent that equalises NPV of both paths.'));
-  rows.push(card('📈', 'Rent Growth Rate', inp.rentGrowth, solveBreakeven(x => npvDiff('rentGrowth', x), -0.05, 0.20), pctVal,
-    'Annual rent escalation rate required to equalise outcomes.'));
-  rows.push(card('🏦', 'Mortgage Interest Rate', inp.mortgageRate, solveBreakeven(x => npvDiff('mortgageRate', x), 0, 0.25), pctVal,
-    'Mortgage rate that equalises buying and renting.'));
-  rows.push(card('🏠', 'Property Capital Growth', inp.propertyGrowth, solveBreakeven(x => npvDiff('propertyGrowth', x), -0.10, 0.25), pctVal,
-    'Annual capital growth needed for equity to match portfolio.'));
-  rows.push(card('💹', 'ETF Investment Return', inp.investReturn, solveBreakeven(x => npvDiff('investReturn', Math.max(x, inp.dividendYield)), 0, 0.30), pctVal,
-    'Total investment return needed for portfolio to match equity.'));
-  rows.push(card('💰', 'Property Purchase Price', inp.propertyPrice, solveBreakeven(x => npvDiff('propertyPrice', x), inp.propertyPrice * 0.2, inp.propertyPrice * 3), dollarVal,
-    'Purchase price that equalises the outcome holding other inputs fixed.'));
-  rows.push(card('🧾', 'Council Rates', inp.councilRates, solveBreakeven(x => npvDiff('councilRates', x), 0, inp.councilRates * 8 + 5000), dollarVal,
-    'Annual municipal rates required to reach break-even.'));
-  rows.push(card('🔧', 'Maintenance Rate', inp.maintenanceRate, solveBreakeven(x => npvDiff('maintenanceRate', x), 0, 0.10), pctVal,
-    'Annual maintenance cost (% of value) required to equalise.'));
-
-  el.innerHTML = rows.join('');
+  el.innerHTML = buildBreakevenItems(inp).map(card).join('');
 }
 
 // ══════════════════════════════════════════════════════════
 //  WHAT-IF: ANALYSIS HORIZON
 // ══════════════════════════════════════════════════════════
 
-window.runWhatIf = function () {
+globalThis.runWhatIf = function () {
   const inp = _lastInp;
   if (!inp) return;
   const yearsEl = document.getElementById('wi-years');
   const testYears = yearsEl ? parseInt(yearsEl.value, 10) : inp.years;
 
-  const testRes = project({ ...inp, years: testYears });
+  const testRes = project({ ...inp, years: testYears }, { light: true });
   const npvDelta = testRes.npvRent - testRes.npvBuy;
-  const winner = npvDelta >= 0 ? 'Rent &amp; Invest' : 'Buying';
+  const buyLabel = inp.isInvestmentProperty ? 'Buying (IP)' : 'Buying';
+  const winner = npvDelta >= 0 ? 'Rent &amp; Invest' : buyLabel;
   const winnerCls = npvDelta >= 0 ? 'wb-delta-good' : 'wb-delta-bad';
 
-  document.getElementById('wi-global-result').innerHTML = `
-    <div class="whatif-box">
-      <div class="wb-label">NPV Winner at ${testYears} yrs</div>
-      <div class="wb-val ${winnerCls}">${winner}</div>
-      <div class="wb-sub">leads by ${fmtK(Math.abs(npvDelta))} (today's $)</div>
-    </div>
-    <div class="whatif-box">
-      <div class="wb-label">Buy Net Position</div>
-      <div class="wb-val">${fmtK(testRes.buyNet)}</div>
-      <div class="wb-sub">NPV: ${fmtK(testRes.npvBuy)}</div>
-    </div>
-    <div class="whatif-box">
-      <div class="wb-label">Rent Net Position</div>
-      <div class="wb-val">${fmtK(testRes.rentNet)}</div>
-      <div class="wb-sub">NPV: ${fmtK(testRes.npvRent)}</div>
-    </div>
-  `;
+  const resEl = document.getElementById('wi-global-result');
+  if (resEl) {
+    resEl.innerHTML = `
+      <div class="whatif-box">
+        <div class="wb-label">NPV Winner at ${testYears} yrs</div>
+        <div class="wb-val ${winnerCls}">${winner}</div>
+        <div class="wb-sub">leads by ${fmtK(Math.abs(npvDelta))} (today's $)</div>
+      </div>
+      <div class="whatif-box">
+        <div class="wb-label">Buy Net Position</div>
+        <div class="wb-val">${fmtK(testRes.buyNet)}</div>
+        <div class="wb-sub">NPV: ${fmtK(testRes.npvBuy)}</div>
+      </div>
+      <div class="whatif-box">
+        <div class="wb-label">Rent Net Position</div>
+        <div class="wb-val">${fmtK(testRes.rentNet)}</div>
+        <div class="wb-sub">NPV: ${fmtK(testRes.npvRent)}</div>
+      </div>
+    `;
+  }
 };
 
 function renderWhatIf(inp) {
@@ -1484,9 +1916,10 @@ function renderWhatIf(inp) {
 //  YEAR-BY-YEAR TABLE
 // ══════════════════════════════════════════════════════════
 
-function renderYearTable(rows) {
+function renderYearTable(rows, inp) {
   const el = document.getElementById('year-table');
   if (!el) return;
+  const isIP = !!(inp && inp.isInvestmentProperty);
   const f = n => Math.abs(n) > 0.5 ? fmt(n) : '—';
   const body = rows.map(r => `
     <tr>
@@ -1500,19 +1933,25 @@ function renderYearTable(rows) {
       <td>${f(r.maint)}</td>
       <td>${f(r.rates)}</td>
       <td>${f(r.ownerIns)}</td>
+      ${isIP ? `<td>${f(r.landTax || 0)}</td><td>${f(r.annualRentalIncome || 0)}</td><td>${f(r.negGearingBenefit || 0)}</td>` : ''}
       <td>${f(r.ownerCarry)}</td>
       <td>${f(r.annualRent)}</td>
       <td>${f(r.renterCarry)}</td>
       <td class="${r.gap >= 0 ? 'sc-blue' : 'sc-green'}">${f(r.gap)}</td>
       <td><strong>${fmtK(r.portfolio)}</strong></td>
+      <td><strong>${fmtK(r.buyNet)}</strong></td>
+      <td><strong>${fmtK(r.rentNet)}</strong></td>
     </tr>`).join('');
 
   el.innerHTML = `
     <table class="year-table">
       <thead><tr>
         <th class="yt-l">Year</th><th>Property Value</th><th>Mortgage Debt</th><th>Offset</th><th>Buyer ETF</th><th>Owner Equity</th>
-        <th>Repayment</th><th>Maint.</th><th>Rates/Strata</th><th>Insurance</th><th>Total Owning</th>
+        <th>Repayment</th><th>Maint.</th><th>Rates/Strata</th><th>Insurance</th>
+        ${isIP ? '<th>Land Tax</th><th>Rental Inc.</th><th>Neg Gear / Tax</th>' : ''}
+        <th>Total Owning</th>
         <th>Rent</th><th>Total Renting</th><th>Cash-Flow Gap</th><th>Renter Portfolio</th>
+        <th>Buy Net</th><th>Rent Net</th>
       </tr></thead>
       <tbody>${body}</tbody>
     </table>`;
@@ -1539,45 +1978,65 @@ function _calc() {
 
   updateConditionalUI();
 
-  // Dynamic header horizon pill
+  // Dynamic header pills & subtitle
   const horizonPill = document.getElementById('header-horizon-pill');
   if (horizonPill) horizonPill.textContent = `${inp.years}yr Outcome`;
 
-  const buyerUpfrontCash = Math.max(0, (inp.financeStampDuty ? 0 : inp.stampDuty) + inp.legalFeesBuy
-    + (inp.financeLMI ? 0 : inp.lmiAmount) - inp.fhogAmount);
-  const maxDeposit = Math.max(0, inp.totalSavings - buyerUpfrontCash);
-  const actualDeposit = Math.min(inp.deposit, maxDeposit);
-  const surplus = Math.max(0, inp.totalSavings - actualDeposit - buyerUpfrontCash);
+  const buyPill = document.getElementById('header-buy-pill');
+  if (buyPill) buyPill.textContent = inp.isInvestmentProperty ? 'Buy (Investment)' : 'Buy (PPOR)';
+
+  const headerSub = document.getElementById('header-subtitle');
+  if (headerSub) {
+    const taxDesc = inp.taxRateMethod === 'income' ? 'ATO FY 2025–26 Tax Brackets' : `Flat ${(inp.taxRate * 100).toFixed(0)}% Tax`;
+    const cgtDesc = inp.cgtMethod === 'fy27' ? 'FY27 CGT Rules' : 'Legacy CGT Discount';
+    headerSub.textContent = `Differential Cash-Flow & Wealth Engine · ${taxDesc} · ${cgtDesc}`;
+  }
+
+  const policyBadge = document.getElementById('policy-badge');
+  if (policyBadge) {
+    const parts = [];
+    if (inp.isInvestmentProperty) parts.push('IP');
+    parts.push(inp.cgtMethod === 'fy27' ? 'FY27 CGT' : 'Legacy CGT');
+    parts.push(`Vol ${(inp.retVol * 100).toFixed(0)}%`);
+    policyBadge.textContent = parts.join(' · ');
+  }
+
+  const upfront = computeUpfrontAndLoan(inp);
 
   const depositSavingsHint = document.getElementById('deposit-savings-hint');
   if (depositSavingsHint) {
-    depositSavingsHint.textContent = inp.deposit > maxDeposit
-      ? `⚠ Deposit exceeds available cash after upfront costs (${fmt(maxDeposit)}) — auto-adjusted to ${fmt(actualDeposit)}`
+    depositSavingsHint.textContent = inp.deposit > upfront.maxDeposit
+      ? `⚠ Deposit exceeds available cash after upfront costs (${fmt(upfront.maxDeposit)}) — auto-adjusted to ${fmt(upfront.actualDeposit)}`
       : '';
   }
 
   const lvrHint = document.getElementById('lvr-hint');
   if (lvrHint) {
-    const loan = Math.max(0, inp.propertyPrice - actualDeposit + (inp.financeStampDuty ? inp.stampDuty : 0) + (inp.financeLMI ? inp.lmiAmount : 0));
-    const lvr = inp.propertyPrice > 0 ? (loan / inp.propertyPrice * 100) : 0;
-    const lmiNote = lvr > 80 && inp.lmiAmount <= 0 ? ' — LMI required (click Auto-estimate)' : '';
-    lvrHint.textContent = `Loan: ${fmt(loan)} · LVR ${lvr.toFixed(1)}%${lmiNote}`;
+    const lmiNote = upfront.lvr > 80 && inp.lmiAmount <= 0 ? ' — LMI required (click Auto-estimate)' : '';
+    lvrHint.textContent = `Loan: ${fmt(upfront.loanAmount)} · LVR ${upfront.lvr.toFixed(1)}%${lmiNote}`;
+  }
+
+  const stampDutyHint = document.getElementById('stamp-duty-hint');
+  if (stampDutyHint) {
+    stampDutyHint.textContent = (inp.state === 'SA' && inp.firstHomeBuyer && !inp.isInvestmentProperty)
+      ? 'ℹ SA FHB stamp duty exemption applies to new builds only (established homes pay full duty; edit to $0 if building new).'
+      : '';
   }
 
   const mortgageHint = document.getElementById('mortgage-repayment-hint');
   if (mortgageHint) {
-    const loan = Math.max(0, inp.propertyPrice - actualDeposit
-      + (inp.financeStampDuty ? inp.stampDuty : 0)
-      + (inp.financeLMI ? inp.lmiAmount : 0));
-    const repay = annualMortgageRepayment(loan, inp.mortgageRate, inp.loanTerm, inp.interestOnly);
+    const repay = annualMortgageRepayment(upfront.loanAmount, inp.mortgageRate, inp.loanTerm, inp.interestOnly);
     mortgageHint.textContent = repay > 0
-      ? `Repayment: ${fmt(repay)}/yr (${fmt(repay / 52)}/wk)${inp.interestOnly ? ' — Interest Only' : ''}`
+      ? `Repayment: ${fmt(repay)}/yr (${fmt(repay / 52)}/wk)${inp.interestOnly ? ' — Interest Only (principal not reduced; full loan remains at exit)' : ''}`
       : '';
   }
 
   const savingsBreakdownHint = document.getElementById('savings-breakdown-hint');
   if (savingsBreakdownHint) {
-    savingsBreakdownHint.textContent = `Day 1 Parity: Buy = ${fmt(actualDeposit)} deposit + ${fmt(buyerUpfrontCash)} upfront + ${fmt(surplus)} surplus → ${inp.surplusDestination} · Rent = ${fmt(inp.totalSavings)} fully invested in ETFs`;
+    const rentSplit = upfront.bond > 0
+      ? `${fmt(upfront.renterInitial)} ETF + ${fmt(upfront.bond)} bond`
+      : `${fmt(upfront.renterInitial)} fully invested in ETFs`;
+    savingsBreakdownHint.textContent = `Day 1 Parity: Buy = ${fmt(upfront.actualDeposit)} deposit + ${fmt(upfront.buyerUpfrontCash)} upfront + ${fmt(upfront.buyerSurplus)} surplus → ${inp.surplusDestination} · Rent = ${rentSplit}`;
   }
 
   const divYieldWarn = document.getElementById('divyield-warn');
@@ -1617,29 +2076,34 @@ function _calc() {
   renderHero(inp, result, mc);
 
   // ── MILESTONE CARDS ──
-  const surplusNote = result.buyerSurplus > 0
-    ? (inp.surplusDestination === 'offset'
-        ? ` + ${fmt(result.finalOffsetBalance)} offset + ${fmt(result.buyerEtfNet)} surplus ETF`
-        : ` + ${fmt(result.buyerEtfNet)} surplus ETF`)
-    : '';
+  const surplusParts = [];
+  if (result.finalOffsetBalance > 0.5) surplusParts.push(`${fmt(result.finalOffsetBalance)} offset`);
+  if (result.buyerEtfNet > 0.5) surplusParts.push(`${fmt(result.buyerEtfNet)} surplus ETF`);
+  const surplusNote = surplusParts.length ? ` + ${surplusParts.join(' + ')}` : '';
+  const propCgtNote = result.propertyCgt > 0.5 ? ` and property CGT ${fmt(result.propertyCgt)}` : '';
 
   renderCard('buy', fmtK(result.buyNet), `NPV: ${fmtK(result.npvBuy)}`,
-    `Property ${fmt(result.finalPropertyValue)} minus debt ${fmt(result.finalMortgageBalance)} and selling agent costs ${fmt(result.sellingCosts)}${surplusNote}<br>
-     <span style="font-size:10.5px;color:var(--text-muted)">${inp.mainResidence ? 'PPOR — 100% CGT Exempt' : 'Investment Property — CGT applicable'}</span>`,
+    `Property ${fmt(result.finalPropertyValue)} minus debt ${fmt(result.finalMortgageBalance)}, selling costs ${fmt(result.sellingCosts)}${propCgtNote}${surplusNote}<br>
+     <span style="font-size:10.5px;color:var(--text-muted)">${inp.mainResidence ? 'PPOR — 100% CGT Exempt' : 'Investment Property — CGT deducted'}</span>`,
     result.buyNet >= result.rentNet ? 100 : (result.buyNet / Math.max(1, result.rentNet) * 100),
     result.buyNet >= result.rentNet ? 'Leading' : '');
 
+  const rentCgtLabel = inp.cgtMethod === 'fy27'
+    ? 'FY27 Real Gain Indexation'
+    : (inp.cgtDiscount > 0 ? `Legacy ${Math.round(inp.cgtDiscount * 100)}% CGT Discount` : 'Legacy — No CGT Discount');
+  const bondNote = result.bond > 0.5 ? ` + bond refund ${fmt(result.bond)}` : '';
+
   renderCard('rent', fmtK(result.rentNet), `NPV: ${fmtK(result.npvRent)}`,
-    `Portfolio ${fmt(result.finalPortfolio)} minus CGT ${fmt(result.cgt)} and selling brokerage ${fmt(result.etfSellFee)} + bond refund ${fmt(result.bond)}<br>
-     <span style="font-size:10.5px;color:var(--text-muted)">${inp.cgtMethod === 'fy27' ? 'FY27 Real Gain Indexation' : 'Legacy 50% CGT Discount'}</span>`,
+    `Portfolio ${fmt(result.finalPortfolio)} minus CGT ${fmt(result.cgt)} and selling brokerage ${fmt(result.etfSellFee)}${bondNote}<br>
+     <span style="font-size:10.5px;color:var(--text-muted)">${rentCgtLabel}</span>`,
     result.rentNet >= result.buyNet ? 100 : (result.rentNet / Math.max(1, result.buyNet) * 100),
     result.rentNet >= result.buyNet ? 'Leading' : '');
 
   renderCard('breakeven', result.breakevenYear != null ? `Year ${result.breakevenYear}` : `Beyond ${inp.years} yrs`,
-    result.breakevenYear != null ? `Crossover at Yr ${result.breakevenYear}` : 'No crossover',
+    result.breakevenYear != null ? `Sustained crossover at Yr ${result.breakevenYear}` : 'No sustained crossover',
     result.breakevenYear != null
-      ? `Owner equity overtakes renter portfolio from Year ${result.breakevenYear} onward.`
-      : `Owner equity does not overtake renter portfolio within the ${inp.years}-year horizon.`,
+      ? `Net Buy liquidation wealth stays ahead of Rent from Year ${result.breakevenYear} through Year ${inp.years}.`
+      : `Net Buy liquidation wealth does not stay ahead of Rent by Year ${inp.years}.`,
     result.breakevenYear != null ? Math.max(0, 100 - (result.breakevenYear / inp.years * 100)) : 0,
     result.breakevenYear != null ? `${inp.years - result.breakevenYear} yrs to spare` : '');
 
@@ -1651,8 +2115,8 @@ function _calc() {
     Math.min(100, Math.abs(npvDelta) / Math.max(result.npvBuy, result.npvRent, 1) * 100),
     npvDelta >= 0 ? 'Rent Ahead' : 'Buy Ahead');
 
-  renderScenarios(inp, result);
-  renderBreakevenReport(inp, result);
+  renderScenarios(inp);
+  renderBreakevenReport(inp);
   renderWhatIf(inp);
 
   // ── TAX STRIP (year 1) ──
@@ -1661,12 +2125,23 @@ function _calc() {
     document.getElementById('ts-mortgage').textContent = fmt(row1.annualRepayment);
     document.getElementById('ts-mortgage-weekly').textContent = fmt(row1.annualRepayment / 52) + '/wk';
     document.getElementById('ts-owner-extra').textContent = fmt(row1.maint + row1.rates + row1.ownerIns + (row1.landTax || 0));
+    const extraSub = document.getElementById('ts-owner-extra-sub');
+    if (extraSub) extraSub.textContent = inp.isInvestmentProperty ? 'maint. + rates + ins. + land tax' : 'maint. + rates + insurance';
     document.getElementById('ts-owner-total').textContent = fmt(row1.ownerCarry);
+    const totalSub = document.getElementById('ts-owner-total-sub');
+    if (totalSub) totalSub.textContent = inp.isInvestmentProperty ? 'net of rent & tax' : 'per year';
     document.getElementById('ts-rent').textContent = fmt(row1.annualRent);
     document.getElementById('ts-rent-weekly').textContent = fmt(row1.annualRent / 52) + '/wk';
-    document.getElementById('ts-gap').textContent = (row1.gap >= 0 ? '+' : '') + fmt(row1.gap);
-    document.getElementById('ts-gap-note').textContent = row1.gap >= 0 ? 'Renter saves difference' : 'Buyer saves difference';
-    document.getElementById('ts-initial-invest').textContent = fmt(result.renterInitial);
+    document.getElementById('ts-gap').textContent = (row1.gap > 0 ? '+' : '') + fmt(row1.gap);
+    document.getElementById('ts-gap-note').textContent = inp.isInvestmentProperty
+      ? (row1.gap >= 0 ? 'Net IP cash cost (saved by renter)' : 'Net IP cash surplus (saved by buyer)')
+      : (row1.gap >= 0 ? 'Renter saves difference' : 'Buyer saves difference');
+    const gapItem = document.getElementById('ts-gap-item');
+    if (gapItem) {
+      gapItem.classList.remove('gap-rent', 'gap-buy');
+      gapItem.classList.add(row1.gap >= 0 ? 'gap-rent' : 'gap-buy');
+    }
+    document.getElementById('ts-initial-invest').textContent = fmt(inp.totalSavings);
   }
 
   // ── CHARTS & TABLE ──
@@ -1675,20 +2150,79 @@ function _calc() {
   if (row1) buildOwnCostChart(row1);
   buildGapChart(result.rows);
   buildEquityChart(result.rows);
-  renderYearTable(result.rows);
+  renderYearTable(result.rows, inp);
 
   saveState();
 }
 
 // ══════════════════════════════════════════════════════════
-//  INIT & RESPONSIVE EVENT LISTENERS
+//  FLOATING TOOLTIPS & RESPONSIVE EVENT LISTENERS
 // ══════════════════════════════════════════════════════════
+
+let _activeTooltipBtn = null;
+function initTooltips() {
+  const portal = document.createElement('div');
+  portal.id = 'floating-tooltip';
+  portal.setAttribute('role', 'tooltip');
+  portal.hidden = true;
+  document.body.appendChild(portal);
+
+  const show = (btn) => {
+    const textEl = btn.closest('.tooltip-wrap')?.querySelector('.tooltip-text');
+    if (!textEl) return;
+    portal.textContent = textEl.textContent.trim();
+    portal.hidden = false;
+    portal.style.visibility = 'hidden';
+
+    const rect = btn.getBoundingClientRect();
+    const tipRect = portal.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const margin = 10;
+
+    let left = rect.left + rect.width / 2 - tipRect.width / 2;
+    left = Math.max(margin, Math.min(vw - tipRect.width - margin, left));
+
+    let top = rect.top - tipRect.height - 8;
+    if (top < margin) {
+      top = Math.min(vh - tipRect.height - margin, rect.bottom + 8);
+    }
+    portal.style.left = `${Math.round(left)}px`;
+    portal.style.top = `${Math.round(top)}px`;
+    portal.style.visibility = 'visible';
+    _activeTooltipBtn = btn;
+  };
+
+  const hide = () => {
+    portal.hidden = true;
+    _activeTooltipBtn = null;
+  };
+
+  document.querySelectorAll('.tooltip-icon').forEach(btn => {
+    btn.addEventListener('mouseenter', () => show(btn));
+    btn.addEventListener('focus', () => show(btn));
+    btn.addEventListener('mouseleave', () => { if (document.activeElement !== btn) hide(); });
+    btn.addEventListener('blur', hide);
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!portal.hidden && _activeTooltipBtn === btn) hide();
+      else show(btn);
+    });
+  });
+
+  document.addEventListener('click', hide);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+  document.getElementById('input-panel')?.addEventListener('scroll', hide, { passive: true });
+}
 
 let resizeDebounce;
 function handleResize() {
   clearTimeout(resizeDebounce);
   resizeDebounce = setTimeout(() => {
-    Chart.defaults.font.size = isMobileView() ? 10 : 11;
+    if (typeof Chart !== 'undefined') {
+      Chart.defaults.font.size = isMobileView() ? 10 : 11;
+    }
     if (_lastResult && _lastRows.length && _lastInp) {
       buildProjectionChart(_lastRows, _lastResult, _lastInp, _lastMc);
       buildFinalChart(_lastResult);
@@ -1700,31 +2234,78 @@ function handleResize() {
 }
 
 function initUX() {
+  // Set initial mobile tab visibility cleanly
+  const resultsPanel = document.getElementById('results-panel');
+  const inputPanel = document.getElementById('input-panel');
+  if (inputPanel && resultsPanel) {
+    inputPanel.classList.remove('mobile-hidden');
+    resultsPanel.classList.add('mobile-hidden');
+  }
+
   document.querySelectorAll('input[type="number"]').forEach(el => {
     el.addEventListener('focus', function () { this.select(); });
   });
 
-  // Touch listener for tooltips on mobile
-  document.querySelectorAll('.tooltip-wrap').forEach(wrap => {
-    wrap.addEventListener('click', e => {
-      e.stopPropagation();
-      document.querySelectorAll('.tooltip-wrap').forEach(w => { if (w !== wrap) w.classList.remove('active'); });
-      wrap.classList.toggle('active');
+  // Snap out-of-range numeric inputs back into slider bounds on commit
+  DUAL_INPUT_PAIRS.forEach(([rangeId, numId, lbl, pre, suf]) => {
+    const numEl = document.getElementById(numId);
+    if (!numEl) return;
+    numEl.addEventListener('change', () => {
+      const min = parseFloat(numEl.min);
+      const max = parseFloat(numEl.max);
+      let v = parseFloat(numEl.value);
+      if (isNaN(v)) v = parseFloat(document.getElementById(rangeId)?.value || min || 0);
+      if (!isNaN(min)) v = Math.max(min, v);
+      if (!isNaN(max)) v = Math.min(max, v);
+      numEl.value = v;
+      syncDualInput(numId, rangeId, lbl, pre, suf);
+      calc();
     });
   });
-  document.addEventListener('click', () => {
-    document.querySelectorAll('.tooltip-wrap.active').forEach(w => w.classList.remove('active'));
+
+  // Clear preset highlight when preset-controlled fields are edited manually
+  const presetFields = new Set(Object.values(CITY_PRESETS).flatMap(p => Object.keys(p)));
+  presetFields.forEach(id => {
+    document.getElementById(id)?.addEventListener('input', clearActivePreset);
   });
+
+  initTooltips();
 
   window.addEventListener('resize', handleResize);
   window.addEventListener('orientationchange', handleResize);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  initDark();
-  if (!applyUrlParams()) loadState();
-  initUX();
-  updateRangeLabels();
-  updateConditionalUI();
-  calc();
-});
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    initDark();
+    if (!applyUrlParams()) loadState();
+    initUX();
+    updateRangeLabels();
+    updateConditionalUI();
+    calc();
+  });
+}
+
+// Export pure engine functions for automated testing in non-browser runtimes
+globalThis.__rentVBuyEngine = {
+  incomeTax,
+  totalIncomeTax,
+  marginalTaxRate,
+  computeIncrementalTax,
+  estimateStampDuty,
+  estimateLMI,
+  computeUpfrontAndLoan,
+  annualMortgageRepayment,
+  amortizeYear,
+  growEtfYear,
+  computePortfolioCgt,
+  computePropertyCgt,
+  project,
+  discountToday,
+  runMonteCarlo,
+  solveBreakeven,
+  fmt,
+  fmtK,
+  fmtAxis,
+  pct,
+};
