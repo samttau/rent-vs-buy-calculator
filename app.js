@@ -2282,7 +2282,7 @@ if (typeof document !== 'undefined') {
     initUX();
     updateRangeLabels();
     updateConditionalUI();
-    calc();
+    _calc();
   });
 }
 
